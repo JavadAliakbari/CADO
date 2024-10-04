@@ -1,0 +1,7 @@
+mu1: 0.001
+mu2: 0.001
+iner_iter_GA_R: 10
+iner_step_GA_R: 0.1
+iter_or_cycles_to_find_next_atom: 40
+rho_min: 1
+rho_max: 2
