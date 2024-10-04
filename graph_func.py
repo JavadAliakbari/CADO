@@ -5,12 +5,21 @@ from graph import Graph
 from utils import *
 
 
-class Graph_func(f):
-    def __init__(self, signal: GraphSig, graph: Graph) -> None:
+class GraphFunc(f):
+    def __init__(
+        self,
+        graph: Graph,
+        signal: GraphSig = None,
+    ) -> None:
         self.signal: GraphSig = signal
         self.graph: Graph = graph
 
+    def update_sig(self, sig: GraphSig):
+        self.signal = sig
+
     def calc_objective(self):
+        if self.signal is None:
+            return 0
         term_1 = matrix_dot_product(self.graph.Abar, self.signal.L)
 
         # term2
@@ -35,6 +44,8 @@ class Graph_func(f):
         return obj
 
     def calc_grad(self) -> GraphGrad:
+        if self.signal is None:
+            return 0
         grad_L = self.calc_grad_L()
         grad_R = self.calc_grad_R()
         grad_pi = self.calc_grad_pi()

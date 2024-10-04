@@ -14,6 +14,14 @@ class Config:
         self.rho_min = self.config["rho_min"]
         self.rho_max = self.config["rho_max"]
 
+        self.tau = self.config["tau"]
+        self.eta = self.config["eta"]
+        self.cogent_iters = self.config["cogent_iters"]
+        self.noise_level_Ri = self.config["noise_level_Ri"]
+        self.include_rhos = self.config["include_rhos"]
+        self.GP_iters = self.config["GP_iters"]
+        self.GP_tol = self.config["GP_tol"]
+
     def load_config(path):
         with open(path) as f:
             config = yaml.load(f, yaml.FullLoader)

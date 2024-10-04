@@ -1,4 +1,3 @@
-from graph_atoms import GraphAtoms
 from sig import Sig
 
 

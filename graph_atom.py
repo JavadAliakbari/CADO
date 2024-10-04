@@ -4,22 +4,22 @@ from utils import *
 
 
 class GraphAtom(Atom):
-    def __init__(self, e=None, R=None, b=None, coef=None) -> None:
-        super().__init__(coef)
-        self.e = e
-        self.R = R
-        self.b = b
-        self.n = e.shape[0]
-        self.d = R.shape[0]
-        self.c = b.shape[0]
+    def __init__(self) -> None:
+        super().__init__()
 
     def set_params(self, e, R, b, coef) -> None:
         self.e = e
         self.R = R
         self.b = b
         self.coef = coef
+        self.n = e.shape[0]
+        self.d = R.shape[0]
+        self.c = b.shape[0]
 
-    def initialize(self):
+    def initialize(self, n, d, c):
+        self.n = n
+        self.d = d
+        self.c = c
         # Initialization
         self.e = np.random.randn(self.n)
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
@@ -30,6 +30,8 @@ class GraphAtom(Atom):
             include_extremes=False,
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
+
+        aaa = 9
 
     def e_term(self):
         return np.outer(self.e, self.e)
@@ -46,7 +48,7 @@ class GraphAtom(Atom):
     def calc_outer_R(self):
         return self.coef * self.R_term()
 
-    def calc_outer_b(self):
+    def calc_outer_pi(self):
         return self.coef * self.b_term()
 
     def grad_R(self):
@@ -60,3 +62,6 @@ class GraphAtom(Atom):
 
     def update_b(self, b):
         self.b = b
+
+    def update_coef(self, coef):
+        self.coef = coef

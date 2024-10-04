@@ -14,7 +14,7 @@ class AtomsCoefs:
     def remove_atom(self, atom: Atom):
         self.atoms.remove(atom)
 
-    def calc_objective(self):
+    def calc_sig(self):
         sum([])
 
 
