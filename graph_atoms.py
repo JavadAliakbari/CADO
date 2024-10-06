@@ -26,13 +26,18 @@ class GraphAtoms(AtomsCoefs):
     def calc_pi(self):
         return sum([atom.calc_outer_pi() for atom in self.atoms])
 
-    def update_coefficients(self, factor):
+    def scale_coefficients(self, factor):
         atom: GraphAtom
         for atom in self.atoms[:-1]:
             atom.update_coef(atom.coef * (1 - factor))
 
         last_atom: GraphAtom = self.atoms[-1]
         last_atom.update_coef(last_atom.coef * factor)
+
+    def update_coefficients(self, coefs=None):
+        atom: GraphAtom
+        for atom, c in zip(self.atoms, coefs):
+            atom.update_coef(c)
 
     def get_coefs(self):
         return np.array([atom.coef for atom in self.atoms])

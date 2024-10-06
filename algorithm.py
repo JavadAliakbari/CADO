@@ -47,6 +47,7 @@ def update_e(grad: GraphGrad, atom: GraphAtom):
     # tmp2 = np.array([atom.b[label] for label in y])
     tmp2 = np.einsum("ij,j->i", grad.grad_pi, atom.b)
     tmp3 = grad.grad_L - config.mu1 * np.diag(tmp1) + config.mu2 * np.diag(tmp2)
+    # S, eigvecs = np.linalg.eigh(tmp3)
     eigvecs, _, _ = np.linalg.svd(tmp3)
     epsilon = eigvecs[:, 0]
 
@@ -74,14 +75,14 @@ def update_b(grad: GraphGrad, atom: GraphAtom):
 
 
 def calc_dot(grad: GraphGrad, atom: GraphAtom):
-    term1 = matrix_dot_product(atom.e_term() * grad.grad_L)
-    term2 = matrix_dot_product(atom.R_term() * grad.grad_Rv)
-    term3 = matrix_dot_product(atom.b_term() * grad.grad_pi)
+    term1 = matrix_dot_product(atom.e_term(), grad.grad_L)
+    term2 = matrix_dot_product(atom.R_term(), grad.grad_Rv)
+    term3 = matrix_dot_product(atom.b_term(), grad.grad_pi)
 
     return -term1 + config.mu1 * term2 - config.mu2 * term3
 
 
-def Forward_step(atoms, f):
+def Forward_step(atoms: GraphAtoms, f: GraphFunc):
     sig = atoms.calc_sig()
     f.update_sig(sig)
     grad = f.calc_grad()
@@ -95,7 +96,7 @@ def Forward_step(atoms, f):
     gamma = 2 / (itr + 2)
 
     # Line 7 of CoGEnT(Line Search)
-    atoms.update_coefficients(gamma)
+    atoms.scale_coefficients(factor=gamma)
 
 
 def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
@@ -136,7 +137,7 @@ def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
         if stop_flag == 1:
             # Successful exit
             err = 0
-            atoms.update_coefficients(c)
+            atoms.update_coefficients(coefs=c)
             return err
 
         if alpha < alpha_min:
@@ -148,12 +149,12 @@ def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
         # Update values for next iteration
         # r = r_new
         c = c_new
-        atoms.update_coefficients(c)
+        atoms.update_coefficients(coefs=c)
         f_val = f_new
 
     # If maximum iterations reached
     err = 1
-    atoms.update_coefficients(c)
+    atoms.update_coefficients(coefs=c)
     return err
 
 
@@ -189,3 +190,5 @@ if __name__ == "__main__":
         Enhancemnet_step(atoms, f)
 
         a = 0
+
+print([np.round(atom.e, 2) for atom in atoms.atoms])
