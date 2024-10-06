@@ -61,12 +61,8 @@ class PerfectGraph(Graph):
         ## Generate symmetric matrices Ri
         Ri_matrices = np.stack(
             [
-                create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-                    self.num_features,
-                    config.rho_min,
-                    config.rho_max,
-                    noise_level=config.noise_level_Ri,
-                    include_extremes=config.include_rhos,
+                create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
+                    self.num_features, config.rho_min, config.rho_max
                 )
                 for _ in range(self.num_clusters)
             ],

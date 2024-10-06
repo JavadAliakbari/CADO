@@ -6,6 +6,7 @@ from graph_atom import GraphAtom
 from graph_atoms import GraphAtoms
 from graph_func import GraphFunc
 from graph_grad import GraphGrad
+from graph_sig import GraphSig
 from perfect_graph import PerfectGraph
 from utils import *
 
@@ -69,7 +70,8 @@ def update_R(grad: GraphGrad, atom: GraphAtom):
 ## Step 3: Fix epsilon and R, update b (closed-form solution)
 def update_b(grad: GraphGrad, atom: GraphAtom):
     a = np.einsum("i, ij-> j", atom.e**2, grad.grad_pi)
-    b = np.argmax(a, keepdims=True)
+    b = np.zeros(grad.grad_pi.shape[-1], dtype=float)
+    b[np.argmax(a)] = 1
 
     return b
 
@@ -84,8 +86,8 @@ def calc_dot(grad: GraphGrad, atom: GraphAtom):
 
 def Forward_step(atoms: GraphAtoms, f: GraphFunc):
     sig = atoms.calc_sig()
-    f.update_sig(sig)
-    grad = f.calc_grad()
+    # f.update_sig(sig)
+    grad = f.calc_grad(sig)
 
     new_atom = find_next_atom(grad)
     new_atom.update_coef(config.tau)
@@ -93,25 +95,26 @@ def Forward_step(atoms: GraphAtoms, f: GraphFunc):
     # Dict.append(create_atom(eps, R, b))
 
     # Line 6 of CoGEnT
-    gamma = 2 / (itr + 2)
+    gamma = 2 / (itr + 3)
 
     # Line 7 of CoGEnT(Line Search)
     atoms.scale_coefficients(factor=gamma)
 
 
-def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
+def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc, sig: GraphSig):
+    alpha_min = 1e-6
+    alpha_red = 0.5
+    c1 = 1e-3
     for iter in range(config.GP_iters):
         grad = f.calc_grad()
-        g = np.array([calc_dot(grad, atom) for atom in atoms.atoms])
-        # g = A.T @ r  # Gradient of the function
+        g = np.array(
+            [calc_dot(grad, atom) for atom in atoms.atoms]
+        )  # Gradient of the function
         alpha = 1.0
-        stop_flag = 0
-        alpha_min = 1e-6
-        alpha_red = 0.5
-        c1 = 1e-3
-        f_val = f.calc_objective()
+        stop_flag = False
+        f_val = f.calc_objective(sig)
 
-        while (alpha > alpha_min) and (stop_flag == 0):
+        while (alpha > alpha_min) and (not stop_flag):
             # Projection onto the simplex
             # f = f.calc_objective()
             c = atoms.get_coefs()
@@ -121,9 +124,11 @@ def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
             tol_check = np.linalg.norm(c - c_new)
             if (alpha == 1) and (iter > 1):
                 if tol_check <= config.GP_tol:
-                    stop_flag = 1
+                    stop_flag = True
 
             # Compute the new residual and function value
+            
+            new_sig = atoms.calc_sig()
             f_new = f.calc_objective()
             # r_new = A @ c_new - y
             # f_new = 0.5 * (r_new.T @ r_new)
@@ -134,7 +139,7 @@ def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
 
             alpha *= alpha_red  # Reduce step size
 
-        if stop_flag == 1:
+        if stop_flag:
             # Successful exit
             err = 0
             atoms.update_coefficients(coefs=c)
@@ -156,6 +161,10 @@ def Enhancemnet_step(atoms: GraphAtoms, f: GraphFunc):
     err = 1
     atoms.update_coefficients(coefs=c)
     return err
+
+
+def Truncate(grad: GraphGrad, f: GraphFunc):
+    pass
 
 
 if __name__ == "__main__":
@@ -186,9 +195,13 @@ if __name__ == "__main__":
     iter = 0
     for itr in tqdm(range(config.cogent_iters)):
         Forward_step(atoms, f)
-        # Coeffs = update_coefficients_GP(Dict, Coeffs, tau)
         Enhancemnet_step(atoms, f)
 
         a = 0
 
-print([np.round(atom.e, 2) for atom in atoms.atoms])
+a = [str(np.round(atom.e, 2)) for atom in atoms.atoms]
+coefs = [str(np.round(atom.coef, 4)) for atom in atoms.atoms]
+with open("./file.txt", mode="w") as fid:
+    fid.write("\n".join(str(year) for year in a))
+
+print(coefs)

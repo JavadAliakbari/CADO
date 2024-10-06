@@ -58,6 +58,36 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     return symmetric_matrix
 
 
+def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
+    dimension, rho_minus, rho_plus
+):
+    """
+    Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
+
+    Parameters:
+    dimension (int): Size of the matrix (n x n).
+    rho_minus (float): Lower bound of the eigenvalues.
+    rho_plus  (float): Upper bound of the eigenvalues.
+    noise_level (float): The scale of the noise to be added (small value to slightly perturb).
+    include_extremes (bool): If True, include rho_minus and rho_plus as exact eigenvalues.
+
+    Returns:
+    np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
+    """
+    signal_eigenvalues = np.random.uniform(rho_plus, 2 * rho_plus, 2)
+    noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
+    all_eigenvalues = np.concatenate((signal_eigenvalues, noise_eigenvalues))
+
+    # Create rho_minus random orthogonal matrix Q using QR decomposition
+    Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
+
+    # Construct the symmetric matrix using A = Q * Lambda * Q.T
+    Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
+    symmetric_matrix = Q @ Lambda @ Q.T
+
+    return symmetric_matrix
+
+
 def create_multiple_noisy_probability_vectors(
     count, dimension, noise_level=0.0, manual_probabilities=None
 ):

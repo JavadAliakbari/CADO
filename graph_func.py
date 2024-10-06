@@ -9,31 +9,29 @@ class GraphFunc(f):
     def __init__(
         self,
         graph: Graph,
-        signal: GraphSig = None,
+        # signal: GraphSig = None,
     ) -> None:
-        self.signal: GraphSig = signal
+        # self.signal: GraphSig = signal
         self.graph: Graph = graph
 
-    def update_sig(self, sig: GraphSig):
-        self.signal = sig
+    # def update_sig(self, sig: GraphSig):
+    #     self.signal = sig
 
-    def calc_objective(self):
-        if self.signal is None:
+    def calc_objective(self, signal: GraphSig):
+        if signal is None:
             return 0
-        term_1 = matrix_dot_product(self.graph.Abar, self.signal.L)
+        term_1 = matrix_dot_product(self.graph.Abar, signal.L)
 
         # term2
-        Rv_matrices_inverse = np.array(
-            [np.linalg.inv(matrix) for matrix in self.signal.Rv]
-        )
+        Rv_matrices_inverse = np.array([np.linalg.inv(matrix) for matrix in signal.Rv])
         term_2 = matrix_dot_product(self.graph.X @ Rv_matrices_inverse, self.graph.X)
 
         # term3
-        term_3 = np.trace(np.sum(self.signal.Rv, axis=0))
+        term_3 = np.trace(np.sum(signal.Rv, axis=0))
 
         # term4
-        n = self.signal.pi.shape[0]
-        term_4 = np.sum(self.signal.pi[np.arange(n), self.graph.y])
+        n = signal.pi.shape[0]
+        term_4 = np.sum(signal.pi[np.arange(n), self.graph.y])
         obj = (
             -1 * term_1
             + config.mu1 * term_2
@@ -43,24 +41,22 @@ class GraphFunc(f):
 
         return obj
 
-    def calc_grad(self) -> GraphGrad:
-        if self.signal is None:
+    def calc_grad(self, signal) -> GraphGrad:
+        if signal is None:
             return 0
-        grad_L = self.calc_grad_L()
-        grad_R = self.calc_grad_R()
-        grad_pi = self.calc_grad_pi()
+        grad_L = self.calc_grad_L(signal)
+        grad_R = self.calc_grad_R(signal)
+        grad_pi = self.calc_grad_pi(signal)
 
         grad = GraphGrad(grad_L, grad_R, grad_pi)
         return grad
 
-    def calc_grad_L(self):
-        return self.graph.Abar
+    def calc_grad_L(self, signal):
+        return self.graph.A
 
-    def calc_grad_R(self):
+    def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices
-        Rv_matrices_inverse = np.array(
-            [np.linalg.inv(matrix) for matrix in self.signal.Rv]
-        )
+        Rv_matrices_inverse = np.array([np.linalg.inv(matrix) for matrix in signal.Rv])
         x_xtranspose = np.array([np.outer(xv, xv) for xv in self.graph.X])
         gradient_Rv = np.array(
             [
@@ -75,10 +71,10 @@ class GraphFunc(f):
 
         return gradient_Rv
 
-    def calc_grad_pi(self):
+    def calc_grad_pi(self, signal):
         # Third block: Gradient with respect to pi_kv
         tmp = np.zeros(
-            (self.graph.num_nodes, self.graph.num_classes), dtype=int
+            (self.graph.num_nodes, self.graph.num_classes), dtype=float
         )  # Assuming labels are zero-indexed and y.max() gives the highest class index
         tmp[np.arange(self.graph.num_nodes), self.graph.y] = (
             1  # Create a one-hot encoded matrix
