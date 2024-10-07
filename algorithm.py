@@ -123,9 +123,6 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     for iter in range(config.GP_iters):
         sig = atoms.calc_sig(coefs)
         grad = f.calc_grad(sig)
-        grad.L *= -1
-        grad.Rv *= config.mu1
-        grad.pi *= -config.mu2
         g = np.array(
             [grad.dot(atom.calc_sig_term()) for atom in atoms]
         )  # Gradient of the function
@@ -173,6 +170,37 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     return coefs
 
 
+def Enhancemnet_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
+    alpha = 0.01
+    stop_flag = False
+    iter = 0
+    while not stop_flag and iter < config.GP_iters:
+        sig = atoms.calc_sig(coefs)
+        grad = f.calc_grad(sig)
+        # grad.L *= -1
+        grad.Rv *= config.mu1
+        grad.pi *= -config.mu2
+        g = np.array(
+            [grad.dot(atom.calc_sig_term()) for atom in atoms]
+        )  # Gradient of the function
+
+        # Projection onto the simplex
+        c = coefs.get_coefs()
+        c_new = project_to_simplex(c - alpha * g, config.tau)
+        # c_new = c - alpha * g
+        coefs.update_coefficients(c_new)
+
+        # Check convergence tolerance
+        tol_check = np.linalg.norm(c - c_new)
+        if tol_check <= config.GP_tol:
+            stop_flag = True
+
+        iter += 1
+
+    # atoms.update_coefficients(coefs=c)
+    return coefs
+
+
 def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
     terminate = False
     while not terminate:
@@ -205,6 +233,7 @@ if __name__ == "__main__":
     num_features = 5  # Dimension of the features at each node
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
+    config.tau = n
     graph = PerfectGraph(samples_per_cluster, num_features)
 
     ## Initialization
@@ -218,7 +247,8 @@ if __name__ == "__main__":
     f = GraphFunc(graph=graph)
 
     iter = 0
-    for itr in tqdm(range(config.cogent_iters)):
+    bar = tqdm(total=config.cogent_iters)
+    for itr in range(config.cogent_iters):
         sig = atoms.calc_sig(coefs)
         f_sig = f(sig)
         coefs = Forward_step(atoms, f, coefs)
@@ -230,7 +260,12 @@ if __name__ == "__main__":
         F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
         atoms, coefs = Truncate(atoms, f, coefs, F_th)
-        aaa = 0
+        bar.set_postfix(
+            {
+                "f": f_sig,
+            }
+        )
+        bar.update()
 
 a = [str(np.round(atom.e, 2)) + str(np.round(atom.b, 2)) for atom in atoms]
 with open("./file.txt", mode="w") as fid:

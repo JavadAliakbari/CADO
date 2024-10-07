@@ -8,7 +8,7 @@ class GraphAtom(Atom):
     def __init__(self) -> None:
         super().__init__()
 
-    def set_params(self, e, R, b, coef) -> None:
+    def set_params(self, e, R, b) -> None:
         self.e = e
         self.R = R
         self.b = b

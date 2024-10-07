@@ -40,12 +40,7 @@ class GraphFunc(f):
         # term4
         n = signal.pi.shape[0]
         term_4 = np.sum(signal.pi[np.arange(n), self.graph.y])
-        obj = (
-            -1 * term_1
-            + config.mu1 * term_2
-            + config.mu1 * term_3
-            - config.mu2 * term_4
-        )
+        obj = term_1 + config.mu1 * term_2 + config.mu1 * term_3 - config.mu2 * term_4
 
         return obj
 
@@ -60,13 +55,21 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal):
-        r = self.graph.A - signal.L
-        return r
+        return self.graph.A - signal.L
         # return self.graph.Abar
 
     def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices
-        Rv_matrices_inverse = np.array([np.linalg.inv(matrix) for matrix in signal.Rv])
+
+        Rv_matrices_inverse = []
+        for matrix in signal.Rv:
+            try:
+                matrix_inv = np.linalg.inv(matrix)
+            except:
+                matrix_inv = 0 * matrix
+
+            Rv_matrices_inverse.append(matrix_inv)
+        Rv_matrices_inverse = np.array(Rv_matrices_inverse)
         x_xtranspose = np.array([np.outer(xv, xv) for xv in self.graph.X])
         gradient_Rv = np.array(
             [
