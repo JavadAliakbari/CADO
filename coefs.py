@@ -5,6 +5,15 @@ class Coefs:
     def __init__(self) -> None:
         self.coefs = []
 
+    def __len__(self):
+        return len(self.coefs)
+
+    def __iter__(self):
+        return iter(self.coefs)
+
+    def __getitem__(self, idx):
+        return self.coefs[idx]
+
     def scale_coefficients(self, factor):
         self.coefs[:-1] *= 1 - factor
         self.coefs[-1] *= factor
@@ -23,6 +32,3 @@ class Coefs:
 
     def remove_coef(self, idx):
         self.coefs = np.delete(self.coefs, idx)
-
-    def __len__(self):
-        return len(self.coefs)

@@ -13,6 +13,12 @@ class Atoms:
     def __len__(self):
         return len(self.atoms)
 
+    def __iter__(self):
+        return iter(self.atoms)
+
+    def __getitem__(self, idx):
+        return self.atoms[idx]
+
     def add_atom(self, atom: Atom):
         self.atoms.append(atom)
 

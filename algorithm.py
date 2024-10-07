@@ -7,12 +7,14 @@ from graph import Graph
 from graph_atom import GraphAtom
 from atoms import Atoms
 from graph_func import GraphFunc
-from graph_grad import GraphGrad
+
+# from graph_grad import GraphGrad
+from graph_sig import GraphSig
 from perfect_graph import PerfectGraph
 from utils import *
 
 
-def find_next_atom(grad: GraphGrad) -> GraphAtom:
+def find_next_atom(grad: GraphSig) -> GraphAtom:
     """
     Alternating minimization to find the next atom.
 
@@ -43,12 +45,12 @@ def find_next_atom(grad: GraphGrad) -> GraphAtom:
 
 
 ## Step 1: Fix R and b, update epsilon
-def update_e(grad: GraphGrad, atom: GraphAtom):
-    tmp1 = np.einsum("ijk,jk->i", grad.grad_Rv, atom.R)
+def update_e(grad: GraphSig, atom: GraphAtom):
+    tmp1 = np.einsum("ijk,jk->i", grad.Rv, atom.R)
     # tmp1 = np.array([matrix_dot_product(matrix, atom.R) for matrix in grad.grad_Rv])
     # tmp2 = np.array([atom.b[label] for label in y])
-    tmp2 = np.einsum("ij,j->i", grad.grad_pi, atom.b)
-    tmp3 = grad.grad_L - config.mu1 * np.diag(tmp1) + config.mu2 * np.diag(tmp2)
+    tmp2 = np.einsum("ij,j->i", grad.pi, atom.b)
+    tmp3 = grad.L - config.mu1 * np.diag(tmp1) + config.mu2 * np.diag(tmp2)
     # S, eigvecs = np.linalg.eigh(tmp3)
     eigvecs, _, _ = np.linalg.svd(tmp3)
     epsilon = eigvecs[:, 0]
@@ -57,9 +59,9 @@ def update_e(grad: GraphGrad, atom: GraphAtom):
 
 
 ## Step 2: Fix epsilon and b, update R
-def update_R(grad: GraphGrad, atom: GraphAtom):
+def update_R(grad: GraphSig, atom: GraphAtom):
     # grad_R = np.sum(grad.grad_Rv * (atom.e**2)[:, np.newaxis, np.newaxis], axis=0)
-    grad_R = np.einsum("ijk,i->jk", grad.grad_Rv, atom.e**2)
+    grad_R = np.einsum("ijk,i->jk", grad.Rv, atom.e**2)
     R = atom.R
     for _ in range(config.iner_iter_GA_R):
         grad_step_R = R + config.iner_step_GA_R * grad_R
@@ -69,20 +71,12 @@ def update_R(grad: GraphGrad, atom: GraphAtom):
 
 
 ## Step 3: Fix epsilon and R, update b (closed-form solution)
-def update_b(grad: GraphGrad, atom: GraphAtom):
-    a = np.einsum("i, ij-> j", atom.e**2, grad.grad_pi)
-    b = np.zeros(grad.grad_pi.shape[-1], dtype=float)
+def update_b(grad: GraphSig, atom: GraphAtom):
+    a = np.einsum("i, ij-> j", atom.e**2, grad.pi)
+    b = np.zeros(grad.pi.shape[-1], dtype=float)
     b[np.argmax(a)] = 1
 
     return b
-
-
-def calc_dot(grad: GraphGrad, atom: GraphAtom):
-    term1 = matrix_dot_product(atom.e_term(), grad.grad_L)
-    term2 = matrix_dot_product(atom.R_term(), grad.grad_Rv)
-    term3 = matrix_dot_product(atom.b_term(), grad.grad_pi)
-
-    return -term1 + config.mu1 * term2 - config.mu2 * term3
 
 
 def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs):
@@ -90,9 +84,9 @@ def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs):
 
     min_val = np.Infinity
     arg_min_idx = -1
-    for idx in range(len(coefs.coefs)):
-        single_sig = atoms.atoms[idx].calc_sig_term()
-        single_sig = coefs.coefs[idx] * single_sig
+    for idx in range(len(coefs)):
+        single_sig = atoms[idx].calc_sig_term()
+        single_sig = coefs[idx] * single_sig
         residual_sig = sig - single_sig
         val = f(residual_sig)
 
@@ -129,10 +123,14 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     for iter in range(config.GP_iters):
         sig = atoms.calc_sig(coefs)
         grad = f.calc_grad(sig)
+        grad.L *= -1
+        grad.Rv *= config.mu1
+        grad.pi *= -config.mu2
         g = np.array(
-            [calc_dot(grad, atom) for atom in atoms.atoms]
+            [grad.dot(atom.calc_sig_term()) for atom in atoms]
         )  # Gradient of the function
-        alpha = 1e-3
+
+        alpha = 1
         stop_flag = False
         f_val = f(sig)
 
@@ -153,8 +151,6 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
 
             new_sig = atoms.calc_sig(new_coefs)
             f_new = f(new_sig)
-            # r_new = A @ c_new - y
-            # f_new = 0.5 * (r_new.T @ r_new)
 
             # Check the Armijo condition (sufficient decrease condition)
             if f_new <= f_val + c1 * ((c_new - c).T @ g):
@@ -164,27 +160,17 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
 
         if stop_flag:
             # Successful exit
-            err = 0
-            # atoms.update_coefficients(coefs=c)
-            return coefs, err
+            return coefs
 
         if alpha < alpha_min:
             # Unsuccessful exit due to too small step length
             print(" *** No suitable step length found ***")
-            err = 1
-            return coefs, err
+            return coefs
 
-        # Update values for next iteration
-        # r = r_new
         coefs = new_coefs
-        # sig = new_sig
-        # atoms.update_coefficients(coefs=c)
-        # f_val = f_new
 
-    # If maximum iterations reached
-    err = 1
     # atoms.update_coefficients(coefs=c)
-    return coefs, err
+    return coefs
 
 
 def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
@@ -194,11 +180,11 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
 
         new_atoms = deepcopy(atoms)
         new_coefs = deepcopy(coefs)
-        new_atoms.remove_atom(new_atoms.atoms[remove_idx])
+        new_atoms.remove_atom(new_atoms[remove_idx])
         new_coefs.remove_coef(remove_idx)
 
         if len(new_coefs) > 0:
-            new_coefs, _ = Enhancemnet_step(new_atoms, f, new_coefs)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
             new_sig = new_atoms.calc_sig(new_coefs)
             f_new_sig = f(new_sig)
 
@@ -237,7 +223,7 @@ if __name__ == "__main__":
         f_sig = f(sig)
         coefs = Forward_step(atoms, f, coefs)
 
-        coefs, err = Enhancemnet_step(atoms, f, coefs)
+        coefs = Enhancemnet_step(atoms, f, coefs)
 
         sig = atoms.calc_sig(coefs)
         f_sig_new = f(sig)
@@ -246,7 +232,7 @@ if __name__ == "__main__":
         atoms, coefs = Truncate(atoms, f, coefs, F_th)
         aaa = 0
 
-a = [str(np.round(atom.e, 2)) for atom in atoms.atoms]
+a = [str(np.round(atom.e, 2)) + str(np.round(atom.b, 2)) for atom in atoms]
 with open("./file.txt", mode="w") as fid:
     fid.write("\n".join(str(year) for year in a))
 

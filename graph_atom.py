@@ -22,6 +22,8 @@ class GraphAtom(Atom):
         self.d = d
         self.c = c
         # Initialization
+        # self.e = np.zeros(self.n)
+        # self.e[:4] = 0.5
         self.e = np.random.randn(self.n)
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
             self.d,
