@@ -17,14 +17,21 @@ class GraphFunc(f):
     # def update_sig(self, sig: GraphSig):
     #     self.signal = sig
 
-    def calc_objective(self, signal: GraphSig):
+    def __call__(self, signal: GraphSig):
         if signal is None:
             return 0
         term_1 = matrix_dot_product(self.graph.Abar, signal.L)
 
         # term2
-        Rv_matrices_inverse = np.array([np.linalg.inv(matrix) for matrix in signal.Rv])
-        term_2 = matrix_dot_product(self.graph.X @ Rv_matrices_inverse, self.graph.X)
+        try:
+            Rv_matrices_inverse = np.array(
+                [np.linalg.inv(matrix) for matrix in signal.Rv]
+            )
+            term_2 = matrix_dot_product(
+                self.graph.X @ Rv_matrices_inverse, self.graph.X
+            )
+        except:
+            term_2 = 0
 
         # term3
         term_3 = np.trace(np.sum(signal.Rv, axis=0))
@@ -52,7 +59,7 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal):
-        return self.graph.A
+        return self.graph.Abar
 
     def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices

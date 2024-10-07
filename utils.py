@@ -1,8 +1,13 @@
 import os
+import random
 from dotenv import load_dotenv
 import numpy as np
 
 from config_parser import Config
+
+seed = 86
+random.seed(seed)
+np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")

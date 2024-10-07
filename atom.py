@@ -1,6 +1,13 @@
-class Atom:
-    def __init__(self, coef=0) -> None:
-        self.coef = coef
+from sig import Sig
 
-    def set_params(self, e, R, b, coef) -> None:
-        self.coef = coef
+
+class Atom:
+    def __init__(self) -> None:
+        pass
+        # self.coef = coef
+
+    def calc_sig_term(self) -> Sig:
+        raise NotImplementedError
+
+    # def set_params(self, coef) -> None:
+    #     self.coef = coef

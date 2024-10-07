@@ -1,5 +1,6 @@
 import numpy as np
 from atom import Atom
+from graph_sig import GraphSig
 from utils import *
 
 
@@ -11,7 +12,7 @@ class GraphAtom(Atom):
         self.e = e
         self.R = R
         self.b = b
-        self.coef = coef
+        # self.coef = coef
         self.n = e.shape[0]
         self.d = R.shape[0]
         self.c = b.shape[0]
@@ -31,8 +32,6 @@ class GraphAtom(Atom):
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
-        aaa = 9
-
     def e_term(self):
         return np.outer(self.e, self.e)
 
@@ -42,17 +41,12 @@ class GraphAtom(Atom):
     def b_term(self):
         return np.einsum("i,j->ij", ((self.e**2)), self.b)
 
-    def calc_outer_e(self):
-        return self.coef * self.e_term()
-
-    def calc_outer_R(self):
-        return self.coef * self.R_term()
-
-    def calc_outer_pi(self):
-        return self.coef * self.b_term()
-
-    def grad_R(self):
-        return np.sum(self.R * (self.e**2)[:, np.newaxis, np.newaxis], axis=0)
+    def calc_sig_term(self) -> GraphSig:
+        e_term = self.e_term()
+        R_term = self.R_term()
+        b_term = self.b_term()
+        sig = GraphSig(e_term, R_term, b_term)
+        return sig
 
     def update_e(self, e):
         self.e = e
@@ -62,6 +56,3 @@ class GraphAtom(Atom):
 
     def update_b(self, b):
         self.b = b
-
-    def update_coef(self, coef):
-        self.coef = coef

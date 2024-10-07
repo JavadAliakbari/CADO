@@ -5,9 +5,9 @@ iner_step_GA_R: 0.1
 iter_or_cycles_to_find_next_atom: 40
 rho_min: 1                                 # Minimum eigenvalue of Ri
 rho_max: 2                                 # Maximum eigenvalue of Ri
-tau: 1
-eta: 0.2
-cogent_iters: 10
+tau: 0.5
+eta: 0.45
+cogent_iters: 100
 noise_level_Ri: 0.0                        # Scale of noise to adjust eigenvalues
 include_rhos: True                         # Whether rho_min and rho_max are exact eigenvalues
 GP_iters: 10
