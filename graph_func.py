@@ -8,20 +8,15 @@ class GraphFunc(f):
     def __init__(
         self,
         graph: Graph,
-        # signal: GraphSig = None,
     ) -> None:
-        # self.signal: GraphSig = signal
         self.graph: Graph = graph
-
-    # def update_sig(self, sig: GraphSig):
-    #     self.signal = sig
 
     def __call__(self, signal: GraphSig):
         if signal is None:
             return 0
-        # term_1 = matrix_dot_product(self.graph.Abar, signal.L)
-        r = self.graph.A - signal.L
-        term_1 = 0.5 * matrix_dot_product(r, r)
+        term_1 = -matrix_dot_product(self.graph.A, signal.L)
+        # r = self.graph.A - signal.L
+        # term_1 = 0.5 * matrix_dot_product(r, r)
 
         # term2
         try:
@@ -54,9 +49,9 @@ class GraphFunc(f):
         grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
-    def calc_grad_L(self, signal):
-        return self.graph.A - signal.L
-        # return self.graph.Abar
+    def calc_grad_L(self, signal: GraphSig):
+        # return self.graph.A - signal.L
+        return self.graph.A
 
     def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices

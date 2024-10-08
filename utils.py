@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import random
 from dotenv import load_dotenv
@@ -195,6 +196,10 @@ def project_to_simplex(y, a):
     out = y - tau
     out[out < 0] = 0
     return out
+
+
+def project_to_bound(a, a_min=0, a_max=1):
+    return np.clip(a, a_min, a_max)
 
 
 def one_hot_max(vector):

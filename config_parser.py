@@ -21,6 +21,8 @@ class Config:
         self.include_rhos = self.config["include_rhos"]
         self.GP_iters = self.config["GP_iters"]
         self.GP_tol = self.config["GP_tol"]
+        self.alpha = self.config["alpha"]
+        self.beta = self.config["beta"]
 
     def load_config(path):
         with open(path) as f:
