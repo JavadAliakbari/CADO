@@ -1,9 +1,13 @@
+from copy import deepcopy
 import numpy as np
 
 
 class Coefs:
-    def __init__(self) -> None:
-        self.coefs = []
+    def __init__(self, coefs=None) -> None:
+        if coefs is not None:
+            self.coefs = coefs
+        else:
+            self.coefs = []
 
     def __len__(self):
         return len(self.coefs)
@@ -31,4 +35,10 @@ class Coefs:
         self.coefs = np.append(self.coefs, c)
 
     def remove_coef(self, idx):
+        # del self.coefs[idx]
         self.coefs = np.delete(self.coefs, idx)
+
+    def scale_coefs(coefs, factor):
+        coefs = deepcopy(coefs)
+        coefs.scale_coefficients(factor)
+        return coefs

@@ -14,20 +14,22 @@ class GraphFunc(f):
     def __call__(self, signal: GraphSig):
         if signal is None:
             return 0
-        term_1 = -matrix_dot_product(self.graph.A, signal.L)
-        # r = self.graph.A - signal.L
-        # term_1 = 0.5 * matrix_dot_product(r, r)
+        # term_1 = -matrix_dot_product(self.graph.A, signal.L)
+        r = self.graph.A - signal.L
+        term_1 = 0.5 * matrix_dot_product(r, r)
 
         # term2
-        try:
-            Rv_matrices_inverse = np.array(
-                [np.linalg.inv(matrix) for matrix in signal.Rv]
-            )
-            term_2 = matrix_dot_product(
-                self.graph.X @ Rv_matrices_inverse, self.graph.X
-            )
-        except:
-            term_2 = 0
+        Rv_matrices_inverse = []
+        for matrix in signal.Rv:
+            try:
+                matrix_inv = np.linalg.inv(matrix)
+            except:
+                matrix_inv = 0 * matrix
+
+            Rv_matrices_inverse.append(matrix_inv)
+        Rv_matrices_inverse = np.array(Rv_matrices_inverse)
+        tt = np.einsum("ij,ijk->ik", self.graph.X, Rv_matrices_inverse)
+        term_2 = matrix_dot_product(tt, self.graph.X)
 
         # term3
         term_3 = np.trace(np.sum(signal.Rv, axis=0))
@@ -50,8 +52,8 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        # return self.graph.A - signal.L
-        return self.graph.A
+        return self.graph.A - signal.L
+        # return self.graph.A
 
     def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices
@@ -65,17 +67,11 @@ class GraphFunc(f):
 
             Rv_matrices_inverse.append(matrix_inv)
         Rv_matrices_inverse = np.array(Rv_matrices_inverse)
-        x_xtranspose = np.array([np.outer(xv, xv) for xv in self.graph.X])
-        gradient_Rv = np.array(
-            [
-                -np.matmul(
-                    np.matmul(Rv_matrices_inverse[i], x_xtranspose[i]),
-                    Rv_matrices_inverse[i],
-                )
-                + np.eye(self.graph.X.shape[1])
-                for i in range(Rv_matrices_inverse.shape[0])
-            ]
+        z = np.einsum("ij,ikj->ik",self.graph.X, Rv_matrices_inverse)
+        eyes = np.einsum(
+            "i,jk->ijk", np.ones(z.shape[0]), np.eye(self.graph.X.shape[1])
         )
+        gradient_Rv = eyes - np.einsum("ij,ik->ijk", z, z)
 
         return gradient_Rv
 

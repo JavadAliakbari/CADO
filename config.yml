@@ -1,16 +1,18 @@
 mu1: 0
 mu2: 1
+eta: 0.15
+alpha: 0.9
+beta: 0.1
 iner_iter_GA_R: 10
 iner_step_GA_R: 0.1
-iter_or_cycles_to_find_next_atom: 40
+iter_or_cycles_to_find_next_atom: 1000
 rho_min: 1                                 # Minimum eigenvalue of Ri
 rho_max: 2                                 # Maximum eigenvalue of Ri
-tau: 17
-eta: 0.2
+tau: 0
 cogent_iters: 500
 noise_level_Ri: 0.0                        # Scale of noise to adjust eigenvalues
 include_rhos: True                         # Whether rho_min and rho_max are exact eigenvalues
 GP_iters: 10
 GP_tol: 0.0001
-alpha: 0.9
-beta: 0.05
+line_search: False
+local_iter: 1

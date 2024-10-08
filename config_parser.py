@@ -23,6 +23,8 @@ class Config:
         self.GP_tol = self.config["GP_tol"]
         self.alpha = self.config["alpha"]
         self.beta = self.config["beta"]
+        self.line_search = self.config["line_search"]
+        self.local_iter = self.config["local_iter"]
 
     def load_config(path):
         with open(path) as f:
