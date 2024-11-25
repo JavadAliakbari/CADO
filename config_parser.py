@@ -13,6 +13,8 @@ class Config:
         ]
         self.rho_min = self.config["rho_min"]
         self.rho_max = self.config["rho_max"]
+        self.sig_rho_min = self.config["sig_rho_min"]
+        self.sig_rho_max = self.config["sig_rho_max"]
 
         self.tau = self.config["tau"]
         self.eta = self.config["eta"]
@@ -25,6 +27,8 @@ class Config:
         self.beta = self.config["beta"]
         self.line_search = self.config["line_search"]
         self.local_iter = self.config["local_iter"]
+        self.eps = self.config["eps"]
+        self.enhance = self.config["Enhance"]
 
     def load_config(path):
         with open(path) as f:

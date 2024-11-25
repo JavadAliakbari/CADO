@@ -1,11 +1,13 @@
 from copy import deepcopy
 import numpy as np
 
+from utils import *
+
 
 class Coefs:
     def __init__(self, coefs=None) -> None:
         if coefs is not None:
-            self.coefs = coefs
+            self.update_coefficients(coefs)
         else:
             self.coefs = []
 
@@ -18,9 +20,24 @@ class Coefs:
     def __getitem__(self, idx):
         return self.coefs[idx]
 
+    def __setitem__(self, idx, value):
+        self.coefs[idx] = value
+
+    def __lt__(self, other):
+        if isinstance(other, Coefs):
+            return self.coefs < other.coefs
+        return self.coefs < other
+
+    @property
+    def ndim(self):
+        return self.coefs.ndim  # Return the number of dimensions
+
     def scale_coefficients(self, factor):
+        # s = np.sum(self.coefs)
         self.coefs[:-1] *= 1 - factor
         self.coefs[-1] *= factor
+
+        self.coefs = project_to_simplex2(self.coefs, config.tau)
 
     def update_coefficients(self, coefs):
         if not isinstance(coefs, np.ndarray):

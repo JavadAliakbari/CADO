@@ -3,6 +3,8 @@ from atom import Atom
 from coefs import Coefs
 from sig import Sig
 
+from utils import *
+
 
 class Atoms:
     def __init__(
@@ -31,6 +33,10 @@ class Atoms:
     def calc_sig(self, coefs: Coefs) -> Sig:
         if len(coefs) == 0:
             return None
-        return sum(
+        sig: Sig = sum(
             [c * atom.calc_sig_term() for atom, c in zip(self.atoms, coefs.get_coefs())]
         )
+
+        sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
+
+        return sig

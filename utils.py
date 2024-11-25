@@ -1,12 +1,15 @@
-from copy import deepcopy
+from datetime import datetime
 import os
 import random
 from dotenv import load_dotenv
+from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
 from config_parser import Config
+from logger import getLOGGER
 
-seed = 86
+seed = 45
 random.seed(seed)
 np.random.seed(seed)
 
@@ -14,13 +17,64 @@ load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
 config = Config(config_path)
 
+plot = os.environ.get("PLOT") == "True"
+
+plt.rcParams["figure.figsize"] = [12, 9]
+plt.rcParams["figure.dpi"] = 250  # 200 e.g. is really fine, but slower
+plt.rcParams.update({"figure.max_open_warning": 0})
+plt.rcParams["font.size"] = 20
+
+
+now = datetime.now().strftime("%Y%m%d_%H%M%S")
+result_path = os.environ.get("RESULTPATH")
+save_path = f"{result_path}/{now}/"
+
+os.makedirs(save_path, exist_ok=True)
+LOGGER = getLOGGER(
+    name=f"{now}",
+    log_on_file=True,
+    save_path=save_path,
+)
+
+# Define custom colors for 0 and 1 (e.g., 0 -> blue, 1 -> red)
+colors = [
+    (0, "white"),
+    (1, "blue"),
+]  # Replace 'blue' and 'red' with your desired colors
+
+# Create a custom colormap using the colors
+custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+
 
 def matrix_dot_product(A, B):
+    """
+    Compute the dot product of two tensors A and B.
+
+    Parameters:
+    A (numpy.ndarray): First input tensor.
+    B (numpy.ndarray): Second input tensor.
+
+    Returns:
+    float: The dot product of tensors A and B.
+    """
     return np.sum(A * B)
 
 
+# Function to invert a matrix
+def invert_matrix(matrix):
+    try:
+        return np.linalg.inv(matrix)
+    except np.linalg.LinAlgError:
+        return np.eye(matrix.shape[0])
+
+
+def calc_accuracy(pred_y, y):
+    """Calculate accuracy."""
+    return sum(pred_y == y) / len(y)
+
+
 def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-    dimension, rho_minus, rho_plus, noise_level=0.0, include_extremes=True
+    dimension, rho_minus, rho_plus, noise_level=0.0
 ):
     """
     Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
@@ -30,25 +84,12 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     rho_minus (float): Lower bound of the eigenvalues.
     rho_plus  (float): Upper bound of the eigenvalues.
     noise_level (float): The scale of the noise to be added (small value to slightly perturb).
-    include_extremes (bool): If True, include rho_minus and rho_plus as exact eigenvalues.
 
     Returns:
     np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
     """
-    if include_extremes:
-        if dimension < 2:
-            raise ValueError(
-                "Dimension must be at least 2 to include both rho_minus and rho_plus as eigenvalues."
-            )
-        # Generate the remaining dimension - 2 eigenvalues uniformly between rho_minus and rho_plus
-        additional_eigenvalues = np.random.uniform(rho_minus, rho_plus, dimension - 2)
-        # Combine all eigenvalues
-        all_eigenvalues = np.concatenate(
-            ([rho_minus, rho_plus], additional_eigenvalues)
-        )
-    else:
-        # Generate dimension eigenvalues uniformly distributed between rho_minus and rho_plus
-        all_eigenvalues = np.random.uniform(rho_minus, rho_plus, dimension)
+    # Generate dimension eigenvalues uniformly distributed between rho_minus and rho_plus
+    all_eigenvalues = np.random.uniform(rho_minus, rho_plus, dimension)
 
     # Create rho_minus random orthogonal matrix Q using QR decomposition
     Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
@@ -65,7 +106,7 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
 
 
 def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
-    dimension, rho_minus, rho_plus
+    dimension, rho_minus, rho_plus, num_signal_features
 ):
     """
     Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
@@ -80,12 +121,17 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
     Returns:
     np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
     """
-    signal_eigenvalues = np.random.uniform(rho_plus, 2 * rho_plus, 2)
-    noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
+    # signal_eigenvalues = np.random.uniform(rho_plus, 2 * rho_plus, 2)
+    signal_eigenvalues = np.array(num_signal_features * [rho_plus])
+    noise_eigenvalues = np.array([rho_minus] * (dimension - num_signal_features))
+    # noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
     all_eigenvalues = np.concatenate((signal_eigenvalues, noise_eigenvalues))
 
     # Create rho_minus random orthogonal matrix Q using QR decomposition
-    Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
+    # Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
+    idx = np.random.permutation(dimension)
+    Q = np.zeros((dimension, dimension), dtype=float)
+    Q[np.arange(dimension), idx] = 1
 
     # Construct the symmetric matrix using A = Q * Lambda * Q.T
     Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
@@ -165,10 +211,10 @@ def project_to_set_S(matrix, eigen_min, eigen_max):
     np.ndarray: The projected symmetric matrix with eigenvalues in the specified range.
     """
     # Step 1: Symmetrize the matrix
-    sym_matrix = (matrix + matrix.T) / 2
+    # sym_matrix = (matrix + matrix.T) / 2
 
     # Step 2: Perform eigenvalue decomposition
-    eigenvalues, eigenvectors = np.linalg.eigh(sym_matrix)
+    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
 
     # Step 3: Clip the eigenvalues to the specified range [eigen_min, eigen_max]
     clipped_eigenvalues = np.clip(eigenvalues, eigen_min, eigen_max)
@@ -184,21 +230,55 @@ def project_to_set_S(matrix, eigen_min, eigen_max):
 
 
 def project_to_simplex(y, a):
-    u = np.flip(np.sort(y))
-    k = 0
-    while k <= len(y) - 1:
-        tau = (np.sum(u[: k + 1]) - a) / (k + 1)
-        if tau <= u[k]:
-            k += 1
-        else:
-            break
-    tau = (np.sum(u[:k]) - a) / (k)
-    out = y - tau
-    out[out < 0] = 0
-    return out
+    return project_to_simplex2(y, a)
+    # return y
+    """
+    Efficiently project a vector y onto the simplex defined by sum(x) = a and x >= 0.
+
+    Parameters:
+    y (np.ndarray): The input vector to be projected.
+    a (float): The sum constraint for the simplex.
+
+    Returns:
+    np.ndarray: The projected vector.
+    """
+    if a < 0:
+        raise ValueError("The sum constraint 'a' must be non-negative.")
+
+    y[y < 0] = 0
+    y *= a * np.sum(y) ** -1
+    return y
+
+
+def project_to_simplex2(y, a):
+    if y.ndim == 1:
+        return _project_vector_to_simplex(y, a)
+    elif y.ndim == 2:
+        return np.apply_along_axis(_project_vector_to_simplex, 1, y, a)
+    else:
+        raise ValueError("Input array must be 1D or 2D")
+
+
+def _project_vector_to_simplex(y, a):
+    # Step 1: Sort y in descending order (largest to smallest)
+    u = np.sort(y)[::-1]
+
+    # Step 2: Find the rho value
+    # rho is the largest index where the condition u * (index + 1) > cssv holds
+    cssv = np.cumsum(u) - a
+    rho = np.nonzero(u * np.arange(1, len(y) + 1) > cssv)[0][-1]
+    # Step 3: Compute the theta value, which is used to shift the elements of y such that their sum equals 'a'
+    theta = cssv[rho] / (rho + 1)
+
+    # Step 4: Compute the projection to ensure the vector lies within the simplex defined by the sum constraint 'a'
+    return np.maximum(y - theta, 0)
 
 
 def project_to_bound(a, a_min=0, a_max=1):
+    # a_mean = (a_max + a_min) / 2
+    # a[a > a_mean] = 1
+    # a[a < a_mean] = 0
+    # return a
     return np.clip(a, a_min, a_max)
 
 
@@ -213,3 +293,15 @@ def one_hot_max(vector):
     one_hot_vector[max_index] = 1
 
     return one_hot_vector
+
+
+def plot_adj(A, name="L"):
+    # Display the array as an image
+    plt.figure()
+    plt.imshow(A, cmap=custom_cmap)
+
+    # Remove axis for a clean output
+    plt.axis("off")
+
+    # Save the image with a specific DPI (dots per inch) to control the output size
+    plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)

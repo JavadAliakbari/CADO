@@ -10,24 +10,39 @@ class GraphFuncADMM(GraphFunc):
         graph: Graph,
     ) -> None:
         self.graph: Graph = graph
+        self.Lambda = None
+        self.Lp = None
 
-    def __call__(self, signal: GraphSig, Lambda=None, Lp=None):
+    def set_ADMM_params(self, Lambda, Lp):
+        self.Lambda = Lambda
+        self.Lp = Lp
+
+    def __call__(self, signal: GraphSig):
         if signal is None:
-            return 0
+            # term5
+            if self.Lp is not None and self.Lambda is not None:
+                term_5 = -matrix_dot_product(self.Lambda, self.Lp)
+            else:
+                term_5 = 0
+
+            if self.Lp is not None:
+                term_6 = matrix_dot_product(self.Lp, self.Lp)
+            else:
+                term_6 = 0
+
+            return term_5 + config.beta / 2 * term_6
+
         term_1 = matrix_dot_product(self.graph.Abar, signal.L)
         # r = self.graph.A - signal.L
         # term_1 = 0.5 * matrix_dot_product(r, r)
 
         # term2
-        try:
-            Rv_matrices_inverse = np.array(
-                [np.linalg.inv(matrix) for matrix in signal.Rv]
-            )
-            term_2 = matrix_dot_product(
-                self.graph.X @ Rv_matrices_inverse, self.graph.X
-            )
-        except:
-            term_2 = 0
+        if signal.Rv_inv is None:
+            signal.calc_Rv_inv()
+        # tt = np.einsum("ij,ijk->ik", self.graph.X, signal.Rv_inv)
+        # term_2 = matrix_dot_product(tt, self.graph.X)
+        # term_2 = np.trace(self.graph.cov @ signal.Rv_inv)
+        term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv)
 
         # term3
         term_3 = np.trace(np.sum(signal.Rv, axis=0))
@@ -37,14 +52,14 @@ class GraphFuncADMM(GraphFunc):
         term_4 = np.sum(signal.pi[np.arange(n), self.graph.y])
 
         # term5
-        if Lp is not None:
-            d = signal.L - Lp
-            term_5 = matrix_dot_product(Lambda, d)
+        if self.Lp is not None:
+            d = signal.L - self.Lp
+            term_5 = matrix_dot_product(self.Lambda, d)
         else:
             term_5 = 0
 
         # term6
-        if Lp is not None and Lambda is not None:
+        if self.Lp is not None and self.Lambda is not None:
             term_6 = matrix_dot_product(d, d)
         else:
             term_6 = 0
@@ -60,16 +75,17 @@ class GraphFuncADMM(GraphFunc):
 
         return obj
 
-    def calc_grad(self, signal, Lambda, Lp) -> GraphSig:
+    def calc_grad(self, signal) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal, Lambda, Lp)
+        grad_L = self.calc_grad_L(signal)
         grad_R = self.calc_grad_R(signal)
         grad_pi = self.calc_grad_pi(signal)
 
-        grad = GraphSig(grad_L, grad_R, grad_pi)
+        grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad
 
-    def calc_grad_L(self, signal: GraphSig, Lambda, Lp):
+    def calc_grad_L(self, signal: GraphSig):
         # return self.graph.A - signal.L
-        return self.graph.Abar - Lambda - config.beta * (signal.L - Lp)
+        # return self.graph.Abar - config.beta * (signal.L - Lp)
+        return -self.graph.Abar + self.Lambda + config.beta * (signal.L - self.Lp)

@@ -1,16 +1,45 @@
+from concurrent.futures import ProcessPoolExecutor
+
 from sig import Sig
 from utils import *
 
 
 class GraphSig(Sig):
-    def __init__(self, L, R, pi) -> None:
+    def __init__(self, L, Rv, pi, add_eps=True) -> None:
         super().__init__()
-        self.L = L
-        self.Rv = R
-        self.pi = pi
         self.n = L.shape[0]
-        self.d = R.shape[-1]
-        self.c = self.pi.shape[-1]
+        self.c = pi.shape[-1]
+
+        self.L = L
+        if Rv is not None:
+            self.d = Rv.shape[-1]
+            eyes = np.eye(self.d)[None, :]
+            self.Rv = Rv
+            if add_eps:
+                self.Rv += config.eps * eyes
+        else:
+            self.Rv = None
+            self.d = None
+        self.pi = pi
+
+        self.Rv_inv = None
+        self.Rz = None
+
+    def calc_Rv_inv(self):
+        self.Rv_inv = np.array([invert_matrix(matrix) for matrix in self.Rv])
+
+    def solve_R(self, X):
+        # To store the final results
+        self.Rz = np.empty_like(X)
+        for i, (R, x) in enumerate(zip(self.Rv, X)):
+            # Solve R @ y = x for y, which gives y = R^{-1} @ x
+            try:
+                z = np.linalg.solve(R, x)
+                # z = np.linalg.lstsq(R, x, rcond=None)[0]
+            except:
+                z = x
+
+            self.Rz[i] = z
 
     def __add__(self, sig):
         if isinstance(sig, Sig):
@@ -21,7 +50,7 @@ class GraphSig(Sig):
             L = self.L + sig
             Rv = self.Rv + sig
             pi = self.pi + sig
-        sig = GraphSig(L, Rv, pi)
+        sig = GraphSig(L, Rv, pi, add_eps=False)
 
         return sig
 
@@ -29,7 +58,7 @@ class GraphSig(Sig):
         L = self.L + c
         Rv = self.Rv + c
         pi = self.pi + c
-        sig = GraphSig(L, Rv, pi)
+        sig = GraphSig(L, Rv, pi, add_eps=False)
 
         return sig
 
@@ -42,21 +71,21 @@ class GraphSig(Sig):
             L = self.L - sig
             Rv = self.Rv - sig
             pi = self.pi - sig
-        sig = GraphSig(L, Rv, pi)
+        sig = GraphSig(L, Rv, pi, add_eps=False)
         return sig
 
     def __mul__(self, c):
         L = c * self.L
         Rv = c * self.Rv
         pi = c * self.pi
-        sig = GraphSig(L, Rv, pi)
+        sig = GraphSig(L, Rv, pi, add_eps=False)
         return sig
 
     def __rmul__(self, c):
         L = c * self.L
         Rv = c * self.Rv
         pi = c * self.pi
-        sig = GraphSig(L, Rv, pi)
+        sig = GraphSig(L, Rv, pi, add_eps=False)
         return sig
 
     def get_params(self):
@@ -64,7 +93,23 @@ class GraphSig(Sig):
 
     def dot(self, sig):
         term1 = matrix_dot_product(self.L, sig.L)
-        term2 = matrix_dot_product(self.Rv, sig.Rv)
+        if self.Rv is not None and sig.Rv is not None:
+            term2 = matrix_dot_product(self.Rv, sig.Rv)
+        else:
+            term2 = 0
         term3 = matrix_dot_product(self.pi, sig.pi)
 
-        return -term1 + config.mu1 * term2 - config.mu2 * term3
+        return term1 + term2 + term3
+
+
+class EmptySig(GraphSig):
+    def __init__(self, n, d, c) -> None:
+        self.n = n
+        self.d = d
+        self.c = c
+
+        self.L = np.zeros((self.n, self.n), dtype=float)
+        self.Rv = np.array([config.rho_min * np.eye(self.d) for _ in range(self.n)])
+        self.pi = np.array([np.zeros(c) / c for _ in range(self.n)])
+        self.Rv_inv = None
+        self.Rz = None

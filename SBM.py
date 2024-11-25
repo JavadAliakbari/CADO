@@ -2,15 +2,141 @@ import numpy as np
 import networkx as nx
 
 from graph import Graph
+from utils import *
 
 
 class SBM(Graph):
-    def __init__(self, block_sizes, probs) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        block_sizes,
+        probs,
+        num_features,
+        num_signal_features,
+        train_ratio=1,
+    ) -> None:
+        num_nodes = sum(block_sizes)
+        super().__init__(num_nodes, train_ratio)
         self.block_sizes = block_sizes
         self.probs = probs
+        self.num_features = num_features
+        self.num_signal_features = num_signal_features
+        self.num_classes = len(block_sizes)
+        self.num_clusters = self.num_classes
+        self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
+        _, _, self.λ, self.E = self.create_partionioned_graph()
+        self.b, self.pi, self.y = self.create_labels()
 
-    def create_graph(self):
+        self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
+
+        self.cov = (
+            np.einsum("ij,ik->ijk", self.X, self.X)
+            - config.rho_min * np.eye(self.num_features)[None, :]
+        )
+
+    def create_partionioned_graph(self):
+        """
+        Create a block matrix with ones on the diagonal blocks and zeros elsewhere.
+
+        Parameters:
+        block_sizes (list of int): Sizes of the blocks along the diagonal.
+
+        Returns:
+        np.ndarray: The resulting block matrix.
+        """
+
+        K = len(self.block_sizes)
+        # Calculate the total size of the matrix
+        # Initialize the full matrix with zeros
+        A = np.zeros((self.num_nodes, self.num_nodes), dtype=int)
+
+        # Fill the diagonal blocks with ones
+        start_index = 0
+        for size in self.block_sizes:
+            A[start_index : start_index + size, start_index : start_index + size] = 1
+            start_index += size
+
+        eigenvalues, eigenvectors = np.linalg.eigh(A)
+        top_indices = np.argsort(eigenvalues)[
+            -K:
+        ]  # Indices of the K largest eigenvalues
+        Lambda = eigenvalues[top_indices]  # The K largest eigenvalues
+        E = eigenvectors[
+            :, top_indices
+        ]  # The eigenvectors corresponding to the largest eigenvalues, the dimension is nxK
+
+        Abar = A.copy()
+        Abar[Abar == 0] = -1
+
+        return A, Abar, Lambda, E
+
+    def create_adjacancy__matrix(self):
+        K = len(self.block_sizes)
+        n = sum(self.block_sizes)
+
         g = nx.stochastic_block_model(self.block_sizes, self.probs)
-        A = nx.adjacency_matrix(g)
-        return A, Abar, eigen_values, eigen_vectors
+        A = nx.adjacency_matrix(g).toarray()
+        np.fill_diagonal(A, 1)
+
+        D_inv_sqrt = np.diag(1.0 / np.sqrt(np.sum(A, axis=1)))
+        normalized_adj = D_inv_sqrt @ A @ D_inv_sqrt
+
+        Abar = A.copy()
+        Abar[Abar == 0] = -1
+
+        eigenvalues, eigenvectors = np.linalg.eigh(A)
+        top_indices = np.argsort(eigenvalues)[-K:]
+        Lambda = eigenvalues[top_indices]
+        E = eigenvectors[:, top_indices]
+
+        return A, Abar, Lambda, E
+
+    def create_features(self):
+        ## Generate symmetric matrices Ri
+        Ri_matrices = np.stack(
+            [
+                create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
+                    self.num_features,
+                    config.sig_rho_min,
+                    config.sig_rho_max,
+                    self.num_signal_features,
+                )
+                for _ in range(self.num_clusters)
+            ],
+            axis=0,
+        )
+
+        ## Calculate Rv based on the provided expression
+        Rv_matrices = np.einsum(
+            "ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices
+        )
+
+        # Generate feature vectors X based on the multivariate normal distribution
+        X = np.array(
+            [
+                np.random.multivariate_normal(
+                    mean=np.zeros(self.num_features), cov=Rv, size=1
+                ).flatten()
+                for Rv in Rv_matrices
+            ]
+        )
+
+        return Ri_matrices, Rv_matrices, X
+
+    def create_labels(self):
+        ## Generate the probability vector matrix b and generate matrix pi based on the provided expression
+        b = create_multiple_noisy_probability_vectors(
+            self.num_clusters, self.num_classes, noise_level=0.00
+        )
+
+        # pi = []
+        # for i, t in enumerate(self.block_sizes):
+        #     pi.append(np.repeat(b[i, :][None, :], t, axis=0))
+        # pi = np.vstack(pi)
+        pi = ((self.E**2) @ np.diag(self.λ)) @ b
+        # # pi = np.round(pi, 1)
+        pi /= np.sum(pi, axis=1)[:, None]
+
+        ## Labels y based on the probability distributions in pi
+        y = np.array([np.random.choice(self.num_classes, p=pi_row) for pi_row in pi])
+
+        return b, pi, y

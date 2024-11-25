@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -6,14 +7,15 @@ from tqdm import tqdm
 from coefs import Coefs
 from graph_atom import GraphAtom
 from atoms import Atoms
-from graph_func_ADMM import GraphFuncADMM
+from graph_func import GraphFunc
 
+from graph_sig import EmptySig
 from perfect_graph import PerfectGraph
 from algorithm_utils import *
 from utils import *
 
 
-def Gamma_line_search(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
+def Gamma_line_search(atoms: Atoms, f: GraphFunc, coefs: Coefs, Lambda, Lp):
     gamma_min = 0
     gamma_max = 1
 
@@ -72,10 +74,10 @@ def Gamma_line_search(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
     return gamma_min
 
 
-def remove_atom(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
+def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     # sig = atoms.calc_sig(coefs)
 
-    min_val = np.Infinity
+    min_val = np.inf
     arg_min_idx = -1
     for idx in range(len(coefs)):
         new_coefs = deepcopy(coefs)
@@ -87,11 +89,12 @@ def remove_atom(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
             c_new = project_to_simplex(new_coefs, config.tau)
             new_coefs = Coefs()
             new_coefs.update_coefficients(c_new)
+        new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
         residual_sig = new_atoms.calc_sig(new_coefs)
         # single_sig = atoms[idx].calc_sig_term()
         # single_sig = coefs[idx] * single_sig
         # residual_sig = sig - single_sig
-        val = f(residual_sig, Lambda, Lp)
+        val = f(residual_sig)
 
         if val < min_val:
             min_val = val
@@ -100,18 +103,70 @@ def remove_atom(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
     return arg_min_idx
 
 
-def Forward_step(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
-    sig = atoms.calc_sig(coefs)
-    # f.update_sig(sig)
-    grad = f.calc_grad(sig, Lambda, Lp)
+def Em_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
+    for i in range(1):
+        # sig = atoms.calc_sig(coefs)
+        cov = f.calc_cov()
+        # grad = f.calc_grad(sig)
 
-    new_atom = find_next_atom(grad)
+        # R = atoms[-1].R
+        R = update_R2(cov, atoms[-1], i)
+        atoms[-1].R = R
+
+        # coefs = Enhancemnet_step(atoms, f, coefs)
+
+    # atoms[-1].R = f.graph.Rv_matrices[2]
+    return coefs
+
+
+def Em_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
+    for i in range(10):
+        sig = atoms.calc_sig(coefs)
+        grad = f.calc_grad(sig)
+
+        R = atoms[-1].R
+        R = update_R(grad, R)
+        atoms[-1].R = R
+
+        coefs = Enhancemnet_step(atoms, coefs)
+
+    return coefs
+
+
+def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
+    R = np.zeros((f.graph.num_features, f.graph.num_features))
+    for i in range(10):
+        grad = f.calc_grad(sig)
+        new_atom = find_next_atom2(grad, R, itr)
+        new_atoms = deepcopy(atoms)
+        new_atoms.add_atom(new_atom)
+        new_coefs = deepcopy(coefs)
+        new_coefs.add_coef(config.tau)
+
+        # Line 6 of CoGEnT
+        if config.line_search:
+            gamma = Gamma_line_search(atoms, f, coefs)
+        else:
+            gamma = 2 / (itr + 3)
+
+        # Line 7 of CoGEnT(Line Search)
+        new_coefs.scale_coefficients(factor=gamma)
+
+        new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
+
+        new_coefs = Em_step(new_atoms, f, new_coefs)
+        new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
+        new_sig = new_atoms.calc_sig(new_coefs)
+        sig.Rv = new_sig.Rv
+        R = new_atoms[-1].R
+        # grad = f.calc_grad(sig)
+
     coefs.add_coef(config.tau)
     atoms.add_atom(new_atom)
 
     # Line 6 of CoGEnT
     if config.line_search:
-        gamma = Gamma_line_search(atoms, f, coefs, Lambda, Lp)
+        gamma = Gamma_line_search(atoms, f, coefs)
     else:
         gamma = 2 / (itr + 3)
 
@@ -121,20 +176,34 @@ def Forward_step(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
     return coefs
 
 
-def Enhancemnet_step(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
+def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
+    # return coefs
+    # if len(atoms) == 2:
+    #     vals = []
+    #     for i in range(config.tau + 1):
+    #         c_new = [i, config.tau - i]
+    #         coefs = Coefs()
+    #         coefs.update_coefficients(c_new)
+    #         sig = atoms.calc_sig(coefs)
+    #         f_val = f(sig)
+    #         vals.append(f_val)
+    #     plt.plot(vals)
+    #     plt.savefig(f"{save_path}res.png")
+    #     aaa = 2
+
     alpha_min = 1e-6
     alpha_red = 0.5
     c1 = 1e-3
     for iter in range(config.GP_iters):
         sig = atoms.calc_sig(coefs)
-        grad = f.calc_grad(sig, Lambda, Lp)
+        grad = f.calc_grad(sig)
         g = np.array(
             [grad.dot(atom.calc_sig_term()) for atom in atoms]
         )  # Gradient of the function
 
         alpha = 1
         stop_flag = False
-        f_val = f(sig, Lambda, Lp)
+        f_val = f(sig)
 
         while (alpha > alpha_min) and (not stop_flag):
             # Projection onto the simplex
@@ -152,7 +221,7 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
             # Compute the new residual and function value
 
             new_sig = atoms.calc_sig(new_coefs)
-            f_new = f(new_sig, Lambda, Lp)
+            f_new = f(new_sig)
 
             # Check the Armijo condition (sufficient decrease condition)
             if f_new <= f_val + c1 * ((c_new - c).T @ g):
@@ -175,16 +244,13 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
     return coefs
 
 
-def Enhancemnet_step2(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
+def Enhancemnet_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     alpha = 0.01
     stop_flag = False
     iter = 0
     while not stop_flag and iter < config.GP_iters:
         sig = atoms.calc_sig(coefs)
-        grad = f.calc_grad(sig, Lambda, Lp)
-        # grad.L *= -1
-        grad.Rv *= config.mu1
-        grad.pi *= -config.mu2
+        grad = f.calc_grad(sig)
         g = np.array(
             [grad.dot(atom.calc_sig_term()) for atom in atoms]
         )  # Gradient of the function
@@ -206,22 +272,22 @@ def Enhancemnet_step2(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, Lambda, Lp):
     return coefs
 
 
-def Truncate(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, F_th, Lambda, Lp):
+def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
     terminate = False
     while not terminate:
-        remove_idx = remove_atom(atoms, f, coefs, Lambda, Lp)
+        remove_idx = remove_atom(atoms, f, coefs)
 
         new_atoms = deepcopy(atoms)
         new_coefs = deepcopy(coefs)
         new_atoms.remove_atom(new_atoms[remove_idx])
         new_coefs.remove_coef(remove_idx)
+        new_c = project_to_simplex(new_coefs, config.tau)
+        new_coefs.update_coefficients(new_c)
 
         if len(new_coefs) > 0:
-            new_coefs = project_to_simplex(new_coefs, config.tau)
-            new_coefs = Coefs(new_coefs)
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, Lambda, Lp)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
             new_sig = new_atoms.calc_sig(new_coefs)
-            f_new_sig = f(new_sig, Lambda, Lp)
+            f_new_sig = f(new_sig)
 
             if f_new_sig <= F_th:
                 atoms = new_atoms
@@ -236,85 +302,122 @@ def Truncate(atoms: Atoms, f: GraphFuncADMM, coefs: Coefs, F_th, Lambda, Lp):
 
 if __name__ == "__main__":
     #### CoGEnT algorithm
-    samples_per_cluster = [4, 3, 2]  # Number of training samples in each cluster
-    num_features = 5  # Dimension of the features at each node
+    # samples_per_cluster = [4, 3, 2]  # Number of training samples in each cluster
+    samples_per_cluster = [100, 90, 80]  # Number of training samples in each cluster
+    num_features = 10  # Dimension of the features at each node
+    num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     config.tau = n
-    graph = PerfectGraph(samples_per_cluster, num_features)
+    graph = PerfectGraph(
+        samples_per_cluster,
+        num_features,
+        num_signal_features,
+        train_ratio=1,
+        # train_ratio=0.4,
+    )
 
     ## Initialization
-    atom0 = GraphAtom()
-    atom0.initialize(n, num_features, c)
-    coefs = Coefs()
-    coefs.update_coefficients([config.tau])
-
     atoms = Atoms()
-    atoms.add_atom(atom0)
-    f = GraphFuncADMM(graph=graph)
-    Lambda = np.random.randn(n, n)
-    Lp = np.random.randn(n, n)
-    Lp = project_to_bound(Lp)
+    coefs = Coefs()
+    f = GraphFunc(graph=graph)
 
+    # atom0 = GraphAtom()
+    # atom0.initialize(n, num_features, c)
+    # atoms.add_atom(atom0)
+    # coefs.update_coefficients([config.tau])
+    # sig = atoms.calc_sig(coefs)
+    sig = EmptySig(graph.X, c)
+    f_sig = f(sig)
     bar = tqdm(total=config.cogent_iters)
     f_values = []
-    diff_vals = []
-    Lambda_terms = []
+    accuracies = []
+    num_atoms = []
     for itr in range(config.cogent_iters):
-        sig = atoms.calc_sig(coefs)
-        f_sig = f(sig, Lambda, Lp)
-        coefs = Forward_step(atoms, f, coefs, Lambda, Lp)
+        # config.eps *= itr / (itr + 1)
+        Forward_step(atoms, f, coefs, sig, itr)
 
-        coefs = Enhancemnet_step(atoms, f, coefs, Lambda, Lp)
+        # coefs = Enhancemnet_step(atoms, f, coefs)
 
         sig = atoms.calc_sig(coefs)
-        f_sig_new = f(sig, Lambda, Lp)
+        f_sig_new = f(sig)
         F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
-        atoms, coefs = Truncate(atoms, f, coefs, F_th, Lambda, Lp)
+        atoms, coefs = Truncate(atoms, f, coefs, F_th)
+        sig = atoms.calc_sig(coefs)
+        f_sig = f(sig)
 
-        # min Lp
-        CoGEnT_sig = atoms.calc_sig(coefs)
-        Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
-        Lp = project_to_bound(Lp)
-
-        # max Lambda
-        Lambda += config.beta * (CoGEnT_sig.L - Lp)
-
-        d = CoGEnT_sig.L - Lp
-        diff = matrix_dot_product(d, d)
-
-        lambda_term = matrix_dot_product(Lambda, d)
-
-        f_sig2 = f(CoGEnT_sig)
+        y_pred = np.argmax(sig.pi, axis=1)
+        y_pred_test = y_pred[graph.test_mask]
+        if y_pred_test.shape[0] > 0:
+            acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+        else:
+            acc = 1
 
         bar.set_postfix(
             {
-                "f": f_sig2,
-                "diff": diff,
-                "lambda_term": lambda_term,
+                "num atoms": len(atoms),
+                "f": f_sig,
+                "acc": acc,
             }
         )
         bar.update()
-        f_values.append(f_sig2)
-        diff_vals.append(diff)
-        Lambda_terms.append(lambda_term)
+        f_values.append(f_sig)
+        num_atoms.append(len(atoms))
+        accuracies.append(acc)
 
-    a = [
-        str(np.round(atom.e, 2)) + str(np.round(atom.b, 2)) + str(c)
-        for c, atom in zip(coefs, atoms)
-    ]
-    with open("./file.txt", mode="w") as fid:
-        fid.write("\n".join(str(year) for year in a))
+    CoGEnT_sig = atoms.calc_sig(coefs)
+    results = {
+        f"atom {id}": {
+            "e": str(np.round(atom.e, 2)),
+            "b": str(np.round(atom.b, 2)),
+            "R": str(np.round(np.linalg.eigvalsh(atom.R), 2)),
+            "λ": str(np.round(c, 2)),
+        }
+        for id, (c, atom) in enumerate(zip(coefs, atoms))
+    }
+    # a += [ for atom in atoms]
+    # results["L"] = np.round(CoGEnT_sig.L, 2).tolist()
+    # results["pi"] = np.round(CoGEnT_sig.pi, 2).tolist()
+    # with open(f"{save_path}file.txt", mode="w") as fid:
+    #     fid.write("\n".join(str(year) for year in a))
 
+    LOGGER.info(json.dumps(results, indent=4))
+    LOGGER.info(np.round(CoGEnT_sig.pi, 2))
+
+    # Display the array as an image
+    plt.figure()
+    plt.imshow(CoGEnT_sig.L, cmap=custom_cmap)
+
+    # Remove axis for a clean output
+    plt.axis("off")
+
+    # Save the image with a specific DPI (dots per inch) to control the output size
+    plt.savefig(f"{save_path}L.png", dpi=300, bbox_inches="tight", pad_inches=0)
+
+    y_pred = np.argmax(CoGEnT_sig.pi, axis=1)
+    y_pred_test = y_pred[graph.test_mask]
+    if y_pred_test.shape[0] > 0:
+        acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+    else:
+        acc = 0
+
+    plt.figure()
     plt.plot(f_values[1:])
-    plt.plot(diff_vals[1:])
-    plt.plot(Lambda_terms[1:])
-    plt.savefig("./loss.png")
+    plt.savefig(f"{save_path}loss.png")
     # plt.show()
+    plt.figure()
+    plt.plot(num_atoms)
+    plt.savefig(f"{save_path}num_atoms.png")
+    plt.figure()
+    plt.plot(accuracies)
+    plt.savefig(f"{save_path}accuracies.png")
+    plt.title("Accuracy")
 
-    print(np.sum((CoGEnT_sig.L < 0) | (CoGEnT_sig.L > 1)))
-    print(np.round(CoGEnT_sig.L, 2))
+    # print(np.sum((CoGEnT_sig.L < 0) | (CoGEnT_sig.L > 1)))
+    # print(np.round(CoGEnT_sig.L, 2))
+    # LOGGER.info(a)
+    LOGGER.info(acc)
     # print(f_sig3)
 
     # print(coefs.coefs)
