@@ -1,9 +1,9 @@
 from typing import List
-from atom import Atom
-from coefs import Coefs
-from sig import Sig
+from Atom.atom import Atom
+from Atom.coefs import Coefs
+from Atom.sig import Sig
 
-from utils import *
+from utils.utils import *
 
 
 class Atoms:

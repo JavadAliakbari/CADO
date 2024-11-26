@@ -5,15 +5,15 @@ import numpy as np
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 
-from SBM import SBM
-from coefs import Coefs
-from atoms import Atoms
-from graph_func import GraphFunc
+from utils.SBM import SBM
+from Atom.coefs import Coefs
+from Atom.atoms import Atoms
+from Graph_Atom.graph_func import GraphFunc
 from algorithm import Forward_step, Truncate, Enhancemnet_step, Gamma_line_search
-from graph_sig import EmptySig
-from perfect_graph import PerfectGraph
-from algorithm_utils import *
-from utils import *
+from Graph_Atom.graph_sig import EmptySig
+from utils.perfect_graph import PerfectGraph
+from utils.algorithm_utils import *
+from utils.utils import *
 
 # Set print options to show the entire array
 np.set_printoptions(threshold=np.inf, suppress=False)

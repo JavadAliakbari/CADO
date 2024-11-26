@@ -4,15 +4,15 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from coefs import Coefs
-from graph_atom import GraphAtom
-from atoms import Atoms
-from graph_func import GraphFunc
+from Atom.coefs import Coefs
+from Graph_Atom.graph_atom import GraphAtom
+from Atom.atoms import Atoms
+from Graph_Atom.graph_func import GraphFunc
 
-from graph_sig import EmptySig
-from perfect_graph import PerfectGraph
-from algorithm_utils import *
-from utils import *
+from Graph_Atom.graph_sig import EmptySig
+from utils.perfect_graph import PerfectGraph
+from utils.algorithm_utils import *
+from utils.utils import *
 
 
 def Gamma_line_search(atoms: Atoms, f: GraphFunc, coefs: Coefs, Lambda, Lp):

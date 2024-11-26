@@ -2,11 +2,11 @@ import pickle as pkl
 
 import numpy as np
 
-from atoms import Atoms
-from coefs import Coefs
-from graph_atom import GraphAtom
-from graph_func import GraphFunc
-from utils import *
+from Atom.atoms import Atoms
+from Atom.coefs import Coefs
+from Graph_Atom.graph_atom import GraphAtom
+from Graph_Atom.graph_func import GraphFunc
+from utils.utils import *
 
 path = "results/20241107_122558/"
 

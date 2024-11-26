@@ -1,4 +1,4 @@
-from sig import Sig
+from Atom.sig import Sig
 
 
 class Atom:

@@ -3,14 +3,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from SBM import SBM
-from coefs import Coefs
-from atoms import Atoms
-from graph_func import GraphFunc
+from utils.SBM import SBM
+from Atom.coefs import Coefs
+from Atom.atoms import Atoms
+from Graph_Atom.graph_func import GraphFunc
 
-from graph_sig import EmptySig
+from Graph_Atom.graph_sig import EmptySig
 from algorithm_utils2 import *
-from utils import *
+from utils.utils import *
 import pickle as pkl
 
 # Set print options to show the entire array

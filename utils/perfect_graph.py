@@ -1,7 +1,7 @@
 import numpy as np
 
-from graph import Graph
-from utils import *
+from utils.graph import Graph
+from utils.utils import *
 
 
 class PerfectGraph(Graph):

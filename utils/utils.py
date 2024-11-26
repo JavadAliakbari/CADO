@@ -6,8 +6,8 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
-from config_parser import Config
-from logger import getLOGGER
+from utils.config_parser import Config
+from utils.logger import getLOGGER
 
 seed = 45
 random.seed(seed)

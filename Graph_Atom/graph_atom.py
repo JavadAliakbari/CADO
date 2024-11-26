@@ -1,7 +1,7 @@
 import numpy as np
-from atom import Atom
-from graph_sig import GraphSig
-from utils import *
+from Atom.atom import Atom
+from Graph_Atom.graph_sig import GraphSig
+from utils.utils import *
 
 
 class GraphAtom(Atom):

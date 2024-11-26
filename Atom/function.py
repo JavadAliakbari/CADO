@@ -1,6 +1,6 @@
-from atoms import Atoms
-from data import Data
-from sig import Sig
+from Atom.atoms import Atoms
+from utils.data import Data
+from Atom.sig import Sig
 
 
 class f:

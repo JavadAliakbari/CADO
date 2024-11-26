@@ -3,14 +3,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from SBM import SBM
-from coefs import Coefs
-from atoms import Atoms
-from graph_func import GraphFunc
+from utils.SBM import SBM
+from Atom.coefs import Coefs
+from Atom.atoms import Atoms
+from Graph_Atom.graph_func import GraphFunc
 
-from graph_sig import EmptySig
-from algorithm_utils import *
-from utils import *
+from Graph_Atom.graph_sig import EmptySig
+from utils.algorithm_utils import *
+from utils.utils import *
 import pickle as pkl
 
 # Set print options to show the entire array
@@ -25,8 +25,8 @@ if __name__ == "__main__":
     num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    probs = np.full((c, c), 0.05)
-    np.fill_diagonal(probs, 0.95)
+    probs = np.full((c, c), 0.0)
+    np.fill_diagonal(probs, 1)
     # probs = np.eye(c)
     config.tau = n
     graph = SBM(
@@ -44,11 +44,6 @@ if __name__ == "__main__":
     coefs = Coefs()
     f = GraphFunc(graph=graph)
 
-    # atom0 = GraphAtom()
-    # atom0.initialize(n, num_features, c)
-    # atoms.add_atom(atom0)
-    # coefs.update_coefficients([config.tau])
-    # sig = atoms.calc_sig(coefs)
     sig = EmptySig(n, num_features, c)
     f_sig = f(sig)
     bar = tqdm(total=config.cogent_iters)
@@ -56,7 +51,6 @@ if __name__ == "__main__":
     accuracies = []
     num_atoms = []
     for itr in range(config.cogent_iters):
-        # config.eps *= itr / (itr + 1)
         coefs = Forward_step(atoms, f, coefs, sig, itr)
 
         coefs = Enhancemnet_step(atoms, f, coefs)
@@ -79,7 +73,7 @@ if __name__ == "__main__":
         bar.set_postfix(
             {
                 "num atoms": len(atoms),
-                f"f" : f"{f_sig:,.4f}",
+                f"f": f"{f_sig:,.4f}",
                 "acc": acc,
             }
         )
@@ -119,7 +113,6 @@ if __name__ == "__main__":
     plt.plot(f_values[1:])
     plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
-    # plt.show()
     plt.figure()
     plt.plot(num_atoms)
     plt.savefig(f"{save_path}num_atoms.png")
@@ -146,10 +139,4 @@ if __name__ == "__main__":
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)
 
-    # print(np.sum((CoGEnT_sig.L < 0) | (CoGEnT_sig.L > 1)))
-    # print(np.round(CoGEnT_sig.L, 2))
-    # LOGGER.info(a)
     LOGGER.info(acc)
-    # print(f_sig3)
-
-    # print(coefs.coefs)

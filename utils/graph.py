@@ -1,6 +1,6 @@
 import numpy as np
 
-from data import Data
+from utils.data import Data
 
 
 class Graph(Data):

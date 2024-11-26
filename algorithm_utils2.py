@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy as sc
 
-from graph_atom import GraphAtom
-from graph_sig import GraphSig
-from coefs import Coefs
-from atoms import Atoms
-from graph_func import GraphFunc
-from utils import *
+from Graph_Atom.graph_atom import GraphAtom
+from Graph_Atom.graph_sig import GraphSig
+from Atom.coefs import Coefs
+from Atom.atoms import Atoms
+from Graph_Atom.graph_func import GraphFunc
+from utils.utils import *
 
 
 def find_next_atom(grad: GraphSig, atoms, coefs, itr) -> GraphAtom:

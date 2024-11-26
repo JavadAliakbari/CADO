@@ -1,7 +1,5 @@
-from concurrent.futures import ProcessPoolExecutor
-
-from sig import Sig
-from utils import *
+from Atom.sig import Sig
+from utils.utils import *
 
 
 class GraphSig(Sig):

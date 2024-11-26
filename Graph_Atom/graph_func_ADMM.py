@@ -1,7 +1,7 @@
-from graph_func import GraphFunc
+from Graph_Atom.graph_func import GraphFunc
 from graph_sig import GraphSig
-from graph import Graph
-from utils import *
+from utils.graph import Graph
+from utils.utils import *
 
 
 class GraphFuncADMM(GraphFunc):

@@ -1,8 +1,8 @@
 import numpy as np
 import networkx as nx
 
-from graph import Graph
-from utils import *
+from utils.graph import Graph
+from utils.utils import *
 
 
 class SBM(Graph):

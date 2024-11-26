@@ -1,7 +1,7 @@
-from graph_sig import GraphSig
-from function import f
-from graph import Graph
-from utils import *
+from Graph_Atom.graph_sig import GraphSig
+from Atom.function import f
+from utils.graph import Graph
+from utils.utils import *
 
 
 class GraphFunc(f):
