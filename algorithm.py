@@ -111,7 +111,7 @@ if __name__ == "__main__":
 
     plt.figure()
     plt.plot(f_values[1:])
-    plt.yscale("log")
+    # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
     plt.figure()
     plt.plot(num_atoms)

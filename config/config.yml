@@ -1,6 +1,6 @@
 mu1: 0
 mu2: 1
-eta: 0.5
+eta: 0.1
 beta: 1
 local_iter: 15
 cogent_iters: 10
