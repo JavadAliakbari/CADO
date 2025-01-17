@@ -83,7 +83,7 @@ class GraphFunc(f):
             term_6 = 0
 
         obj = (
-            term_1 / signal.n
+            term_1
             + config.mu1 * term_2
             + config.mu1 * term_3
             - config.mu2 * term_4

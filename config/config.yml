@@ -1,5 +1,5 @@
-mu1: 0.01
-mu2: 0.1
+mu1: 0.0
+mu2: 0
 eta: 0.01
 beta: 0.9
 local_iter: 1
@@ -20,5 +20,5 @@ tau: 0
 alpha: 0.9
 eps: 0.0
 Enhance: False
-Abar: False
+Abar: True
 ADMM: False

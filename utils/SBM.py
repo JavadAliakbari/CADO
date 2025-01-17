@@ -23,7 +23,7 @@ class SBM(Graph):
         self.num_classes = len(block_sizes)
         self.num_clusters = self.num_classes
         self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
-        _, _, self.λ, self.E = self.create_partionioned_graph()
+        self.L_opt, _, self.λ, self.E = self.create_partionioned_graph()
         self.b, self.pi, self.y = self.create_labels()
 
         self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
