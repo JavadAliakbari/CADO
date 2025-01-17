@@ -1,5 +1,5 @@
 from Graph_Atom.graph_func import GraphFunc
-from graph_sig import GraphSig
+from Graph_Atom.graph_sig import GraphSig
 from utils.graph import Graph
 from utils.utils import *
 
@@ -18,20 +18,6 @@ class GraphFuncADMM(GraphFunc):
         self.Lp = Lp
 
     def __call__(self, signal: GraphSig):
-        if signal is None:
-            # term5
-            if self.Lp is not None and self.Lambda is not None:
-                term_5 = -matrix_dot_product(self.Lambda, self.Lp)
-            else:
-                term_5 = 0
-
-            if self.Lp is not None:
-                term_6 = matrix_dot_product(self.Lp, self.Lp)
-            else:
-                term_6 = 0
-
-            return term_5 + config.beta / 2 * term_6
-
         term_1 = matrix_dot_product(self.graph.Abar, signal.L)
         # r = self.graph.A - signal.L
         # term_1 = 0.5 * matrix_dot_product(r, r)

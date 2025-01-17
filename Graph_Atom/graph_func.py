@@ -10,6 +10,12 @@ class GraphFunc(f):
         graph: Graph,
     ) -> None:
         self.graph: Graph = graph
+        self.Lambda = None
+        self.Lp = None
+
+    def set_ADMM_params(self, Lambda, Lp):
+        self.Lambda = Lambda
+        self.Lp = Lp
 
     # def __call__(self, signal: GraphSig):
     #     if signal is None:
@@ -39,9 +45,12 @@ class GraphFunc(f):
     def __call__(self, signal: GraphSig):
         if signal is None:
             return 0
-        # term_1 = -matrix_dot_product(self.graph.A, signal.L)
-        r = self.graph.A - signal.L
-        term_1 = 0.5 * matrix_dot_product(r, r)
+
+        if config.Abar:
+            term_1 = -matrix_dot_product(self.graph.Abar, signal.L) / signal.n
+        else:
+            r = self.graph.A - signal.L
+            term_1 = 0.5 * matrix_dot_product(r, r) / signal.n
 
         # term2
         if signal.Rv_inv is None:
@@ -49,17 +58,38 @@ class GraphFunc(f):
         # tt = np.einsum("ij,ijk->ik", self.graph.X, signal.Rv_inv)
         # term_2 = matrix_dot_product(tt, self.graph.X)
         # term_2 = np.trace(self.graph.cov @ signal.Rv_inv)
-        term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv)
+        term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / signal.d
 
         # term3
         # term_3 = np.sum(np.log(np.linalg.det(signal.Rv)))
-        term_3 = np.trace(np.sum(signal.Rv, axis=0))
+        term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
 
         # term4
         train_labels = self.graph.y[self.graph.train_mask]
         train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
-        term_4 = np.sum(signal.pi[train_nodes, train_labels])
-        obj = term_1 + config.mu1 * term_2 + config.mu1 * term_3 - config.mu2 * term_4
+        term_4 = np.sum(signal.pi[train_nodes, train_labels]) / signal.c
+
+        # term5
+        if self.Lp is not None:
+            d = signal.L - self.Lp
+            term_5 = matrix_dot_product(self.Lambda, d)
+        else:
+            term_5 = 0
+
+        # term6
+        if self.Lp is not None and self.Lambda is not None:
+            term_6 = matrix_dot_product(d, d) / signal.n
+        else:
+            term_6 = 0
+
+        obj = (
+            term_1 / signal.n
+            + config.mu1 * term_2
+            + config.mu1 * term_3
+            - config.mu2 * term_4
+            + term_5
+            + (config.beta / 2) * term_6
+        )
 
         return obj
 
@@ -70,15 +100,37 @@ class GraphFunc(f):
         if signal is None:
             return 0
         grad_L = self.calc_grad_L(signal)
-        grad_R = self.calc_grad_R(signal)
-        # grad_R = self.calc_grad_R2(signal)
-        grad_pi = self.calc_grad_pi(signal)
+        grad_R = self.calc_grad_R(signal) / signal.d
+        grad_pi = self.calc_grad_pi(signal) / signal.c
 
         grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        return -self.graph.A + signal.L
+
+        if self.Lambda is not None:
+            grad_lambda = self.Lambda
+        else:
+            grad_lambda = 0
+
+        if self.Lp is not None:
+            grad_Lp = self.Lp
+        else:
+            grad_Lp = 0
+
+        if config.Abar:
+            return (
+                -self.graph.Abar / signal.n
+                + grad_lambda
+                + config.beta * (signal.L - grad_Lp) / signal.n
+            )
+        else:
+            return (
+                -self.graph.A / signal.n
+                + signal.L / signal.n
+                + grad_lambda
+                + config.beta * (signal.L - grad_Lp) / signal.n
+            )
         # return self.graph.A
 
     # def calc_grad_R(self, signal: GraphSig):
@@ -98,17 +150,11 @@ class GraphFunc(f):
         # gradient_Rv = Rv_inv - np.einsum(
         #     "ijk,ikm,imn->ijn", Rv_inv, self.graph.cov, Rv_inv
         # )
-        gradient_Rv = np.eye(self.graph.X.shape[1])[None, :] - np.einsum(
+        gradient_Rv = np.eye(self.graph.num_features)[None, :] - np.einsum(
             "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
         )
 
         return config.mu1 * gradient_Rv
-
-    def calc_grad_R2(self, signal: GraphSig):
-        # Second block: Gradient with respect to Rv_matrices
-        gradient_Rv = np.einsum("ij,ik->ijk", self.graph.X, self.graph.X)
-
-        return gradient_Rv
 
     def calc_grad_pi(self, signal):
         # Third block: Gradient with respect to pi_kv

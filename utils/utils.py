@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
+import cvxpy as cp
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
@@ -250,6 +251,33 @@ def project_to_simplex(y, a):
     return y
 
 
+def project_inside_simplex2(λ0, E, a):
+    n, c = E.shape
+    ones = a * np.ones(n)  # RHS of inequality constraints
+
+    λ_var = cp.Variable(c)
+    # Define the objective function
+    objective = cp.Minimize(0.5 * cp.sum_squares(λ_var - λ0))
+
+    # Define constraints
+    constraints = [E @ λ_var <= ones]
+
+    # Solve the optimization problem
+    problem = cp.Problem(objective, constraints)
+    problem.solve()
+
+    return λ_var.value
+
+
+def project_inside_simplex(y, a):
+    if y.ndim == 1:
+        return _project_vector_inside_simplex(y, a)
+    elif y.ndim == 2:
+        return np.apply_along_axis(_project_vector_inside_simplex, 1, y, a)
+    else:
+        raise ValueError("Input array must be 1D or 2D")
+
+
 def project_to_simplex2(y, a):
     if y.ndim == 1:
         return _project_vector_to_simplex(y, a)
@@ -260,6 +288,23 @@ def project_to_simplex2(y, a):
 
 
 def _project_vector_to_simplex(y, a):
+    # Step 1: Sort y in descending order (largest to smallest)
+    u = np.sort(y)[::-1]
+
+    # Step 2: Find the rho value
+    # rho is the largest index where the condition u * (index + 1) > cssv holds
+    cssv = np.cumsum(u) - a
+    rho = np.nonzero(u * np.arange(1, len(y) + 1) > cssv)[0][-1]
+    # Step 3: Compute the theta value, which is used to shift the elements of y such that their sum equals 'a'
+    theta = cssv[rho] / (rho + 1)
+
+    # Step 4: Compute the projection to ensure the vector lies within the simplex defined by the sum constraint 'a'
+    return np.maximum(y - theta, 0)
+
+
+def _project_vector_inside_simplex(y, a):
+    if sum(y) <= a and np.all(y >= 0):
+        return y
     # Step 1: Sort y in descending order (largest to smallest)
     u = np.sort(y)[::-1]
 
@@ -305,3 +350,28 @@ def plot_adj(A, name="L"):
 
     # Save the image with a specific DPI (dots per inch) to control the output size
     plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection="3d")
+
+    # x, y = np.meshgrid(range(A.shape[0]), range(A.shape[1]))
+    # # z = np.zeros_like(A)
+
+    # ax.plot_surface(
+    #     x,
+    #     y,
+    #     A,
+    #     # facecolors=plt.cm.viridis(A),
+    #     # rstride=1,
+    #     # cstride=1,
+    #     # antialiased=False,
+    #     # shade=False,
+    # )
+
+    # # ax.set_zlim(0, 1)
+    # # ax.set_xlabel("X axis")
+    # # ax.set_ylabel("Y axis")
+    # # ax.set_zlabel("Z axis")
+
+    # plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
+    # # plt.show()

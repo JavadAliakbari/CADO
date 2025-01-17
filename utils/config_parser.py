@@ -29,6 +29,8 @@ class Config:
         self.local_iter = self.config["local_iter"]
         self.eps = self.config["eps"]
         self.enhance = self.config["Enhance"]
+        self.Abar = self.config["Abar"]
+        self.ADMM = self.config["ADMM"]
 
     def load_config(path):
         with open(path) as f:

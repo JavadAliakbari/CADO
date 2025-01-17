@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy as sc
 
+
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
 from Graph_Atom.graph_atom import GraphAtom
@@ -11,7 +12,7 @@ from Graph_Atom.graph_func import GraphFunc
 from utils.utils import *
 
 
-def find_next_atom(grad: GraphSig, itr) -> GraphAtom:
+def find_next_atom(grad: GraphSig, constraints, itr) -> GraphAtom:
     """
     Alternating minimization to find the next atom.
 
@@ -35,7 +36,7 @@ def find_next_atom(grad: GraphSig, itr) -> GraphAtom:
     th_old = np.inf
 
     for it in range(max_iter):
-        epsilon = update_e(grad, atom, it, itr)
+        epsilon, λ = update_e(grad, atom, constraints, it, itr)
         atom.update_e(epsilon)
 
         if config.mu1 != 0:
@@ -51,7 +52,7 @@ def find_next_atom(grad: GraphSig, itr) -> GraphAtom:
             break
         th_old = th
 
-    return atom
+    return atom, λ
 
 
 def find_next_atom2(grad: GraphSig, R, itr) -> GraphAtom:
@@ -118,8 +119,71 @@ def find_next_atom2(grad: GraphSig, R, itr) -> GraphAtom:
     return atom
 
 
+def find_eps_lambda(A, constraints):
+    n = A.shape[0]
+    λ, evecs_large = sc.linalg.eigh(A, subset_by_index=(n - 1, n - 1))
+    x = evecs_large[:, 0]
+
+    epsilon_pri = 1e-10
+    max_iterations = 1000
+
+    for _ in range(max_iterations):
+        h = λ * (x**2)
+        # Update y
+        y = np.clip(h, 0, constraints)
+
+        e = np.sign(x) * np.sqrt(y / (λ + 1e-10))
+        e /= np.linalg.norm(e) + 1e-10
+        λ = np.einsum("i,ij,j->", e, A, e)
+
+        r = y - h
+
+        # Check convergence
+        if np.linalg.norm(r) <= epsilon_pri:
+            break
+
+    return e, λ
+
+
+def find_eps_lambda2(A, constraints):
+    # Initialize variables
+    # x = initial_x  # Ensure x^T x = 1
+    n = A.shape[0]
+    nu = np.zeros(n)
+    rho = 5  # Penalty parameter
+
+    epsilon_pri = 1e-6
+    max_iterations = 1000
+
+    for k in range(max_iterations):
+        # Update x
+        M = A + np.diag(nu)
+        λ, evecs_large = sc.linalg.eigh(M, subset_by_index=(n - 1, n - 1))
+        x = evecs_large[:, 0]
+        # eigenvalues, eigenvectors = np.linalg.eigh(M)
+        # λ = np.argmax(eigenvalues)
+        # x = eigenvectors[:, λ]
+
+        h = λ * (x**2)
+        # Update y
+        y = np.clip(h - nu / rho, 0, constraints)
+
+        # Update dual variables
+        r = y - h
+        nu += rho * r
+
+        # Check convergence
+        if np.linalg.norm(r) <= epsilon_pri:
+            break
+
+    # e = np.sign(x) * np.sqrt(y / λ)
+    # e =
+    # λ2 = np.einsum("i,ij,j->", e, A, e)
+    return x, λ
+
+
 ## Step 1: Fix R and b, update epsilon
-def update_e(grad: GraphSig, atom: GraphAtom, iter=0, itr=0):
+def update_e(grad: GraphSig, atom: GraphAtom, constraints, iter=0, itr=0):
     scale_factor = (config.rho_max / config.rho_min) ** 2
     if atom.R is not None:
         tmp1 = np.einsum("ijk,jk->i", grad.Rv, atom.R)
@@ -131,8 +195,12 @@ def update_e(grad: GraphSig, atom: GraphAtom, iter=0, itr=0):
     tmp3 = grad.L + np.diag(tmp1 + tmp2)
     # S, eigvecs = np.linalg.eigh(-tmp3)
     N = tmp3.shape[0]
-    evals_large, evecs_large = sc.linalg.eigh(-tmp3, subset_by_index=(N - 1, N - 1))
-    epsilon = evecs_large[:, 0]
+
+    epsilon, λ = find_eps_lambda(-tmp3, constraints)
+
+    # A = -tmp3
+    # λ, evecs_large = sc.linalg.eigh(A, subset_by_index=(N - 1, N - 1))
+    # epsilon = evecs_large[:, 0]
 
     if plot:
         sub_folder = f"{save_path}{itr}/e/"
@@ -143,7 +211,7 @@ def update_e(grad: GraphSig, atom: GraphAtom, iter=0, itr=0):
         plt.savefig(f"{sub_folder}{iter}.png")
         plt.close()
 
-    return epsilon
+    return epsilon, λ
 
 
 ## Step 2: Fix epsilon and b, update R
@@ -249,33 +317,35 @@ def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs) -> int:
     int: The index of the atom whose removal minimizes the value of `f`. Returns 0 if there is only one coefficient.
     """
     if len(coefs) == 1:
-        return 0
-    # zxzjm
-    # sig = atoms.calc_sig(coefs)
+        return 0, np.inf
+    sig = atoms.calc_sig(coefs)
 
     min_val = np.inf
     arg_min_idx = -1
     for idx in range(len(coefs)):
-        new_coefs = deepcopy(coefs)
-        new_atoms = deepcopy(atoms)
-        new_coefs.remove_coef(idx)
-        # new_atoms.remove_atom(atoms[idx])
-        new_atoms.remove_idx(idx)
-        c_new = project_to_simplex(new_coefs, config.tau)
-        new_coefs = Coefs(c_new)
-        if config.enhance:
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
-        residual_sig = new_atoms.calc_sig(new_coefs)
-        # single_sig = atoms[idx].calc_sig_term()
-        # single_sig = coefs[idx] * single_sig
-        # residual_sig = sig - single_sig
+        # new_coefs = deepcopy(coefs)
+        # new_atoms = deepcopy(atoms)
+        # new_coefs.remove_coef(idx)
+        # # new_atoms.remove_atom(atoms[idx])
+        # new_atoms.remove_idx(idx)
+        # c_new = project_to_simplex(new_coefs, config.tau)
+        # new_coefs = Coefs(c_new)
+        # if config.enhance:
+        #     new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
+        # residual_sig = new_atoms.calc_sig(new_coefs)
+        single_sig = atoms[idx].calc_sig_term()
+        if coefs[idx] == 0:
+            residual_sig = sig
+        else:
+            single_sig = coefs[idx] * single_sig
+            residual_sig = sig - single_sig
         val = f(residual_sig)
 
         if val < min_val:
             min_val = val
             arg_min_idx = idx
 
-    return arg_min_idx
+    return arg_min_idx, min_val
 
 
 def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
@@ -292,22 +362,19 @@ def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
     Returns:
     Coefs: The updated coefficients after the forward step.
     """
+    constraints = 1 - sum(
+        [c * (atom.e**2) for c, atom in zip(coefs.get_coefs(), atoms)],
+        np.zeros(300),
+    )
+    constraints[constraints < 0] = 0
+
     grad = f.calc_grad(sig)
 
-    new_atom = find_next_atom(grad, itr)
-    coefs.add_coef(config.tau)
+    new_atom, λ = find_next_atom(grad, constraints, itr)
+    coefs.add_coef(λ)
     atoms.add_atom(new_atom)
 
-    # Line 6 of CoGEnT
-    if config.line_search:
-        gamma = Gamma_line_search(atoms, f, coefs)
-    else:
-        gamma = 2 / (itr + 3)
-
-    # Line 7 of CoGEnT(Line Search)
-    coefs.scale_coefficients(factor=gamma)
-
-    return coefs
+    return atoms, coefs
 
 
 def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
@@ -329,20 +396,26 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     with backtracking line search to find the optimal step size. The process stops when the
     convergence tolerance is met or the step size becomes too small.
     """
-    if len(coefs) <= 1:
-        coefs.update_coefficients([config.tau])
-        return coefs
+    # if len(coefs) <= 1:
+    #     coefs.update_coefficients([config.tau])
+    #     return coefs
 
     alpha_min, alpha_red, c1 = 1e-6, 0.5, 1e-3
+    E = [atom.e for atom in atoms]
+    E2 = np.array(E).T ** 2
+    c_new = project_inside_simplex2(coefs.get_coefs(), E2, 1)
+    coefs = Coefs(c_new)
+
     sig = atoms.calc_sig(coefs)
     grad = f.calc_grad(sig)
 
     for _ in range(config.GP_iters):
-        g = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
+        grad_λ = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
         alpha, stop_flag = 1, False
 
         while alpha > alpha_min and not stop_flag:
-            c_new = project_to_simplex(coefs.get_coefs() - alpha * g, config.tau)
+            new_λ = coefs.get_coefs() - alpha * grad_λ
+            c_new = project_inside_simplex2(new_λ, E2, 1)
             new_coefs = Coefs(c_new)
             tol_check = np.linalg.norm(coefs.get_coefs() - c_new)
 
@@ -350,7 +423,7 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
                 stop_flag = True
 
             if f(atoms.calc_sig(new_coefs)) <= f(sig) + c1 * (
-                (c_new - coefs.get_coefs()).T @ g
+                (c_new - coefs.get_coefs()).T @ grad_λ
             ):
                 break
 
@@ -409,26 +482,47 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
     """
     terminate = False
     while not terminate:
-        remove_idx = remove_atom(atoms, f, coefs)
-
-        new_atoms = deepcopy(atoms)
-        new_coefs = deepcopy(coefs)
-        new_atoms.remove_atom(new_atoms[remove_idx])
-        new_coefs.remove_coef(remove_idx)
-
-        if len(new_coefs) > 0:
-            new_c = project_to_simplex(new_coefs, config.tau)
-            new_coefs.update_coefficients(new_c)
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
-            new_sig = new_atoms.calc_sig(new_coefs)
-            f_new_sig = f(new_sig)
-
-            if f_new_sig <= F_th:
-                atoms = new_atoms
-                coefs = new_coefs
-            else:
-                terminate = True
+        remove_idx, f_val = remove_atom(atoms, f, coefs)
+        if f_val <= F_th:
+            atoms.remove_atom(atoms[remove_idx])
+            coefs.remove_coef(remove_idx)
         else:
             terminate = True
+
+    return atoms, coefs
+
+
+def Enhance_step(atoms, coefs):
+    E = [atom.e for atom in atoms]
+    E = np.array(E).T
+    n, c = E.shape
+
+    # l = n * np.random.rand(c)
+    # l = n * np.ones(c) / c
+    l = coefs.get_coefs()
+    l = project_to_simplex2(l, n)
+
+    total = 1000
+    # bar = tqdm(total=total)
+    for _ in range(total):
+        H = E**2 @ np.diag(l)
+        A = project_to_simplex2(H, 1)
+        new_l = np.sum(A, axis=0)
+
+        # f1 = sum(sum(np.abs(H - A)))
+        f2 = sum(np.abs(new_l - l))
+        l = new_l
+
+        if f2 < 1e-6:
+            break
+
+        # bar.set_postfix(f1=f1, f2=f2)
+        # bar.update()
+
+    new_E = A @ np.diag(1 / l)
+    for idx, atom in enumerate(atoms):
+        atom.e = np.sqrt(new_E[:, idx])
+
+    coefs.update_coefficients(l)
 
     return atoms, coefs

@@ -7,6 +7,7 @@ class GraphSig(Sig):
         super().__init__()
         self.n = L.shape[0]
         self.c = pi.shape[-1]
+        self.d = Rv.shape[-1]
 
         self.L = L
         if Rv is not None:
@@ -96,7 +97,6 @@ class GraphSig(Sig):
         else:
             term2 = 0
         term3 = matrix_dot_product(self.pi, sig.pi)
-
         return term1 + term2 + term3
 
 

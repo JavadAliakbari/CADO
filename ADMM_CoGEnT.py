@@ -9,7 +9,7 @@ from Atom.coefs import Coefs
 from Atom.atoms import Atoms
 from Graph_Atom.graph_func_ADMM import GraphFuncADMM
 from Graph_Atom.graph_sig import EmptySig
-from utils.algorithm_utils import *
+from utils.algorithm_utils_orig import *
 from utils.utils import *
 import pickle as pkl
 
@@ -21,13 +21,13 @@ np.set_printoptions(threshold=np.inf, suppress=False)
 if __name__ == "__main__":
     #### CoGEnT algorithm
     # samples_per_cluster = [4, 3, 2]  # Number of training samples in each cluster
-    samples_per_cluster = [4, 3, 2]  # Number of training samples in each cluster
+    samples_per_cluster = [40, 40, 40]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
     num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    probs = np.full((c, c), 0.0)
-    np.fill_diagonal(probs, 1)
+    probs = np.full((c, c), 0.05)
+    np.fill_diagonal(probs, 0.95)
     # probs = np.eye(c)
     config.tau = n
     graph = SBM(
@@ -43,6 +43,12 @@ if __name__ == "__main__":
     ## Initialization
     atoms = Atoms()
     coefs = Coefs()
+
+    E = graph.E
+    # E[np.abs(E) < 0.00001] = 0.00001
+    R = graph.Ri_matrices
+    b = graph.b
+
     sig = EmptySig(n, num_features, c)
 
     Lambda = np.zeros((n, n))
@@ -62,7 +68,9 @@ if __name__ == "__main__":
         for itr in range(config.local_iter):
             # sig = atoms.calc_sig(coefs)
             f_sig = f(sig)
-            coefs = Forward_step(atoms, f, coefs, sig, ii * config.local_iter + itr)
+            atoms, coefs = Forward_step(
+                atoms, f, coefs, sig, ii * config.local_iter + itr
+            )
 
             coefs = Enhancemnet_step(atoms, f, coefs)
 

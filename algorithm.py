@@ -9,13 +9,43 @@ from Atom.atoms import Atoms
 from Graph_Atom.graph_func import GraphFunc
 
 from Graph_Atom.graph_sig import EmptySig
-from utils.algorithm_utils import *
+from utils.algorithm_utils_orig import *
 from utils.utils import *
 import pickle as pkl
 
 # Set print options to show the entire array
 np.set_printoptions(threshold=np.inf, suppress=False)
 # np.set_printoptions(suppress=True)
+
+
+def check_constraint(atoms, coefs):
+    sig = atoms.calc_sig(coefs)
+    grad = f.calc_grad(sig)
+
+    for _ in range(config.GP_iters):
+        g = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
+
+    E = [atom.e for atom in atoms]
+    E = np.array(E).T
+    n, c = E.shape
+
+    # l = n * np.random.rand(c)
+    # l = n * np.ones(c) / c
+    l = coefs.get_coefs()
+    # l = project_to_simplex3(l, n)
+
+    H = E**2 @ np.diag(l)
+    A = project_inside_simplex(H, 1)
+    new_l = np.sum(A, axis=0)
+
+    new_E = A @ np.diag(1 / (new_l + 1e-10))
+    for idx, atom in enumerate(atoms):
+        atom.e = np.sign(atom.e) * np.sqrt(new_E[:, idx])
+
+    coefs.update_coefficients(new_l)
+
+    return atoms, coefs
+
 
 if __name__ == "__main__":
     #### CoGEnT algorithm
@@ -25,8 +55,8 @@ if __name__ == "__main__":
     num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    probs = np.full((c, c), 0.0)
-    np.fill_diagonal(probs, 1)
+    probs = np.full((c, c), 0.05)
+    np.fill_diagonal(probs, 0.95)
     # probs = np.eye(c)
     config.tau = n
     graph = SBM(
@@ -35,32 +65,65 @@ if __name__ == "__main__":
         num_features,
         num_signal_features,
         # train_ratio=1,
-        train_ratio=0.4,
+        train_ratio=0.5,
     )
     plot_adj(graph.A, name="A")
 
     ## Initialization
     atoms = Atoms()
     coefs = Coefs()
-    f = GraphFunc(graph=graph)
-
     sig = EmptySig(n, num_features, c)
+    f = GraphFunc(graph=graph)
     f_sig = f(sig)
+
+    if config.ADMM:
+        Lambda = np.zeros((n, n))
+        Lp = sig.L
+        Lp = project_to_bound(Lp)
+
+        f.set_ADMM_params(Lambda, Lp)
+
     bar = tqdm(total=config.cogent_iters)
     f_values = []
     accuracies = []
+    diff_vals = []
+    Lambda_terms = []
     num_atoms = []
-    for itr in range(config.cogent_iters):
-        coefs = Forward_step(atoms, f, coefs, sig, itr)
+    for ii in range(config.cogent_iters):
+        for itr in range(config.local_iter):
+            atoms, coefs = Forward_step(
+                atoms, f, coefs, sig, ii * config.local_iter + itr
+            )
+            # atoms, coefs = check_constraint(atoms, coefs)
+            # if sum(coefs) >= n:
+            #     atoms, coefs = Enhance_step(atoms, coefs)
 
-        coefs = Enhancemnet_step(atoms, f, coefs)
+            coefs = Enhancemnet_step(atoms, f, coefs)
 
-        sig = atoms.calc_sig(coefs)
-        f_sig_new = f(sig)
-        F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
+            sig = atoms.calc_sig(coefs)
+            f_sig_new = f(sig)
+            F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
-        atoms, coefs = Truncate(atoms, f, coefs, F_th)
-        sig = atoms.calc_sig(coefs)
+            # atoms, coefs = Truncate(atoms, f, coefs, F_th)
+            if len(num_atoms) > 2:
+                atoms, coefs = Matrix_Truncate(atoms, f, coefs, F_th)
+            sig = atoms.calc_sig(coefs)
+
+        if config.ADMM:
+            # min Lp
+            # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
+            Lp = n * Lambda / config.beta + sig.L
+            Lp = project_to_bound(Lp)
+
+            # max Lambda
+            d = sig.L - Lp
+            Lambda += config.beta * d / n
+
+            diff = matrix_dot_product(d, d)
+
+            lambda_term = matrix_dot_product(Lambda, d)
+
+            f.set_ADMM_params(Lambda, Lp)
         f_sig = f(sig)
 
         y_pred = np.argmax(sig.pi, axis=1)
@@ -70,17 +133,25 @@ if __name__ == "__main__":
         else:
             acc = 1
 
-        bar.set_postfix(
-            {
-                "num atoms": len(atoms),
-                f"f": f"{f_sig:,.4f}",
-                "acc": acc,
-            }
-        )
+        results = {
+            "num atoms": len(atoms),
+            f"f": f"{f_sig:,.4f}",
+            "acc": acc,
+        }
+
+        if config.ADMM:
+            results["diff"] = diff
+            results["lambda term"] = lambda_term
+
+        bar.set_postfix(results)
         bar.update()
         f_values.append(f_sig)
         num_atoms.append(len(atoms))
         accuracies.append(acc)
+
+        if config.ADMM:
+            diff_vals.append(diff)
+            Lambda_terms.append(lambda_term)
 
     CoGEnT_sig = atoms.calc_sig(coefs)
     results = {
@@ -110,7 +181,7 @@ if __name__ == "__main__":
         acc = 0
 
     plt.figure()
-    plt.plot(f_values[1:])
+    plt.plot(np.log(f_values))
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
     plt.figure()
@@ -138,5 +209,14 @@ if __name__ == "__main__":
     filename = f"{save_path}graph.pkl"
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)
+
+    if config.ADMM:
+        filename = f"{save_path}Lambda.pkl"
+        with open(filename, "wb") as fid:
+            pkl.dump(Lambda, fid)
+
+        filename = f"{save_path}Lp.pkl"
+        with open(filename, "wb") as fid:
+            pkl.dump(Lp, fid)
 
     LOGGER.info(acc)
