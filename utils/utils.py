@@ -20,10 +20,10 @@ config = Config(config_path)
 
 plot = os.environ.get("PLOT") == "True"
 
-plt.rcParams["figure.figsize"] = [12, 9]
+plt.rcParams["figure.figsize"] = [9, 6]
 plt.rcParams["figure.dpi"] = 250  # 200 e.g. is really fine, but slower
 plt.rcParams.update({"figure.max_open_warning": 0})
-plt.rcParams["font.size"] = 20
+plt.rcParams["font.size"] = 10
 
 
 now = datetime.now().strftime("%Y%m%d_%H%M%S")
