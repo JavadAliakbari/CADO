@@ -65,6 +65,7 @@ def update_e(grad: GraphSig, atom: GraphAtom, iter=0, itr=0):
         tmp1 = 0
 
     tmp1 /= scale_factor
+    # tmp1 /= grad.n
     tmp2 = np.einsum("ij,j->i", grad.pi, atom.b)
     tmp3 = grad.L + np.diag(tmp1 + tmp2)
     # S, eigvecs = np.linalg.eigh(-tmp3)
@@ -258,7 +259,7 @@ def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
     return atoms, coefs
 
 
-def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
+def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM):
     """
     Perform the enhancement step for the given coefficients.
 
@@ -281,10 +282,10 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
         coefs.update_coefficients([config.tau])
         return coefs
 
-    alpha_min, alpha_red, c1 = 0.1, 0.5, 1e-3
+    alpha_min, alpha_red, c1 = 0.01, 0.5, 1e-3
     sig = atoms.calc_sig(coefs)
-    f_val = f(sig)
-    grad = f.calc_grad(sig)
+    f_val = f(sig, ADMM=ADMM)
+    grad = f.calc_grad(sig, ADMM=ADMM)
 
     for _ in range(config.GP_iters):
         g = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
@@ -301,11 +302,11 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
             new_coefs = Coefs(c_new)
             tol_check = np.linalg.norm(coefs.get_coefs() - c_new)
 
-            if alpha == 1 and tol_check <= sig.n * config.GP_tol:
+            if alpha == sig.n and tol_check <= sig.n * config.GP_tol:
                 stop_flag = True
 
             new_sig = atoms.calc_sig(new_coefs)
-            f_new = f(new_sig)
+            f_new = f(new_sig, ADMM=ADMM)
 
             if f_new <= f_val + c1 * grad_diff:
                 break
@@ -319,7 +320,7 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
         coefs = new_coefs
         sig = new_sig
         f_val = f_new
-        grad = f.calc_grad(sig)
+        grad = f.calc_grad(sig, ADMM=ADMM)
 
     # print("3")
     return coefs
@@ -385,6 +386,19 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
             if f_new_sig <= F_th:
                 atoms = new_atoms
                 coefs = new_coefs
+                # if config.ADMM:
+                #     # min Lp
+                #     # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
+                #     Lp = f.Lp
+                #     Lambda = f.Lambda
+                #     Lp = Lambda / config.beta + new_sig.L
+                #     Lp = project_to_bound(Lp)
+
+                #     # max Lambda
+                #     # d = new_sig.L - Lp
+                #     # Lambda += config.beta * d
+
+                #     f.set_ADMM_params(Lambda, Lp)
             else:
                 terminate = True
         else:

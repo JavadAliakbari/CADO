@@ -55,8 +55,8 @@ if __name__ == "__main__":
     num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    probs = np.full((c, c), 0.05)
-    np.fill_diagonal(probs, 0.95)
+    probs = np.full((c, c), 0.0)
+    np.fill_diagonal(probs, 1)
     # probs = np.eye(c)
     config.tau = n
     graph = SBM(
@@ -64,8 +64,8 @@ if __name__ == "__main__":
         probs,
         num_features,
         num_signal_features,
-        # train_ratio=1,
-        train_ratio=0.5,
+        train_ratio=1,
+        # train_ratio=0.5,
     )
     plot_adj(graph.A, name="A")
 
@@ -104,15 +104,15 @@ if __name__ == "__main__":
             f_sig_new = f(sig)
             F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
-            # atoms, coefs = Truncate(atoms, f, coefs, F_th)
-            if len(num_atoms) > 2:
-                atoms, coefs = Matrix_Truncate(atoms, f, coefs, F_th)
+            atoms, coefs = Truncate(atoms, f, coefs, F_th)
+            # if len(num_atoms) > 2:
+            #     atoms, coefs = Matrix_Truncate(atoms, f, coefs, F_th)
             sig = atoms.calc_sig(coefs)
 
         if config.ADMM:
             # min Lp
             # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
-            Lp = n * Lambda / config.beta + sig.L
+            Lp = Lambda / config.beta + sig.L
             Lp = project_to_bound(Lp)
 
             # max Lambda
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         acc = 0
 
     plt.figure()
-    plt.plot(np.log(f_values))
+    plt.plot(f_values)
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
     plt.figure()

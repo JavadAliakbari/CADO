@@ -42,7 +42,7 @@ class GraphFunc(f):
 
     #     return obj
 
-    def __call__(self, signal: GraphSig):
+    def __call__(self, signal: GraphSig, ADMM=config.ADMM):
         if signal is None:
             return 0
 
@@ -53,31 +53,38 @@ class GraphFunc(f):
             term_1 = 0.5 * matrix_dot_product(r, r) / signal.n
 
         # term2
-        if signal.Rv_inv is None:
-            signal.calc_Rv_inv()
-        # tt = np.einsum("ij,ijk->ik", self.graph.X, signal.Rv_inv)
-        # term_2 = matrix_dot_product(tt, self.graph.X)
-        # term_2 = np.trace(self.graph.cov @ signal.Rv_inv)
-        term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / signal.d
+        if config.mu1 != 0:
+            if signal.Rv_inv is None:
+                signal.calc_Rv_inv()
+            # tt = np.einsum("ij,ijk->ik", self.graph.X, signal.Rv_inv)
+            # term_2 = matrix_dot_product(tt, self.graph.X)
+            # term_2 = np.trace(self.graph.cov @ signal.Rv_inv)
+            term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / signal.d
 
-        # term3
-        # term_3 = np.sum(np.log(np.linalg.det(signal.Rv)))
-        term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
+            # term3
+            # term_3 = np.sum(np.log(np.linalg.det(signal.Rv)))
+            term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
+        else:
+            term_2 = 0
+            term_3 = 0
 
         # term4
-        train_labels = self.graph.y[self.graph.train_mask]
-        train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
-        term_4 = np.sum(signal.pi[train_nodes, train_labels]) / signal.c
+        if config.mu2 != 0:
+            train_labels = self.graph.y[self.graph.train_mask]
+            train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
+            term_4 = np.sum(signal.pi[train_nodes, train_labels]) / signal.c
+        else:
+            term_4 = 0
 
         # term5
-        if self.Lp is not None:
+        if ADMM and self.Lp is not None:
             d = signal.L - self.Lp
-            term_5 = matrix_dot_product(self.Lambda, d)
+            term_5 = matrix_dot_product(self.Lambda, d) / signal.n
         else:
             term_5 = 0
 
         # term6
-        if self.Lp is not None and self.Lambda is not None:
+        if ADMM and self.Lp is not None and self.Lambda is not None:
             term_6 = matrix_dot_product(d, d) / signal.n
         else:
             term_6 = 0
@@ -96,40 +103,39 @@ class GraphFunc(f):
     def calc_cov(self):
         return self.graph.cov
 
-    def calc_grad(self, signal) -> GraphSig:
+    def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal)
+        # grad_L = self.calc_grad_L(signal, ADMM=ADMM)
+        # grad_R = self.calc_grad_R(signal)
+        # grad_pi = self.calc_grad_pi(signal)
+        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / signal.n
         grad_R = self.calc_grad_R(signal) / signal.d
         grad_pi = self.calc_grad_pi(signal) / signal.c
 
         grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad
 
-    def calc_grad_L(self, signal: GraphSig):
+    def calc_grad_L(self, signal: GraphSig, ADMM=config.ADMM):
 
-        if self.Lambda is not None:
+        if ADMM and self.Lambda is not None:
             grad_lambda = self.Lambda
         else:
             grad_lambda = 0
 
-        if self.Lp is not None:
+        if ADMM and self.Lp is not None:
             grad_Lp = self.Lp
         else:
             grad_Lp = 0
 
         if config.Abar:
-            return (
-                -self.graph.Abar / signal.n
-                + grad_lambda
-                + config.beta * (signal.L - grad_Lp) / signal.n
-            )
+            return -self.graph.Abar + grad_lambda + config.beta * (signal.L - grad_Lp)
         else:
             return (
-                -self.graph.A / signal.n
-                + signal.L / signal.n
+                -self.graph.A
+                + signal.L
                 + grad_lambda
-                + config.beta * (signal.L - grad_Lp) / signal.n
+                + config.beta * (signal.L - grad_Lp)
             )
         # return self.graph.A
 

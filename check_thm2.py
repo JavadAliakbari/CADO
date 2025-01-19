@@ -55,8 +55,8 @@ def create_sig(E, R, b, λ):
         atom0.set_params(E[:, i], R[i], b[i])
         atoms.add_atom(atom0)
         coefs.add_coef(λ[i])
-    opt_sig = atoms.calc_sig(coefs)
-    return opt_sig
+    sig = atoms.calc_sig(coefs)
+    return sig
 
 
 def process_iteration(iter, noisy_E, noisy_coef, f, R, b):
@@ -138,7 +138,7 @@ def run_experiment(
     return f_vals, f_opts, acc
 
 
-def create_random_atoms(n, num_features, c, q):
+def create_random_atoms(n, num_features, c):
     # probs = np.eye(c)
     # E[np.abs(E) < 0.00001] = 0.00001
     noisy_E = 1 * np.random.uniform(-1, 1, (total, n, c))
@@ -168,7 +168,7 @@ def run_outer_loop(
     # Add noise to the signal
     # total = 100000
 
-    noisy_E, noisy_coef, noisy_R, noisy_b = create_random_atoms(n, num_features, c, q)
+    noisy_E, noisy_coef, noisy_R, noisy_b = create_random_atoms(n, num_features, c)
     for q in q_vals:
         probs = np.full((c, c), q)
         np.fill_diagonal(probs, 0.2)
