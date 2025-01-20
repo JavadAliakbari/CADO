@@ -1,4 +1,6 @@
 from datetime import datetime
+import json
+import pickle as pkl
 import os
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
@@ -28,13 +30,6 @@ plt.rcParams["font.size"] = 10
 now = datetime.now().strftime("%Y%m%d_%H%M%S")
 result_path = os.environ.get("RESULTPATH")
 save_path = f"{result_path}/{now}/"
-
-os.makedirs(save_path, exist_ok=True)
-LOGGER = getLOGGER(
-    name=f"{now}",
-    log_on_file=True,
-    save_path=save_path,
-)
 
 # Define custom colors for 0 and 1 (e.g., 0 -> blue, 1 -> red)
 colors = [
@@ -343,6 +338,7 @@ def one_hot_max(vector):
 
 
 def plot_adj(A, name="L"):
+    os.makedirs(save_path, exist_ok=True)
     # Display the array as an image
     plt.figure()
     plt.imshow(A, cmap=custom_cmap)
@@ -377,3 +373,85 @@ def plot_adj(A, name="L"):
 
     # plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
     # # plt.show()
+
+
+def log_results(atoms, coefs, graph, results, save_path, terminal=True):
+    os.makedirs(save_path, exist_ok=True)
+    LOGGER = getLOGGER(
+        name=f"{now}",
+        log_on_file=True,
+        save_path=save_path,
+        terminal=terminal,
+    )
+    sig = atoms.calc_sig(coefs)
+    results = {
+        f"atom {id}": {
+            "e": str(np.round(atom.e, 2)),
+            "b": str(np.round(atom.b, 2)),
+            "R": str(np.round(np.linalg.eigvalsh(atom.R), 2)),
+            "λ": str(np.round(c, 2)),
+        }
+        for id, (c, atom) in enumerate(zip(coefs, atoms))
+    }
+
+    mask = np.argmax(sig.pi, axis=1) == graph.y
+    # Replace True with ✔ and False with ✘
+    marks = np.array(["✔" if value else "✘" for value in mask])[:, None]
+
+    LOGGER.info(json.dumps(results, indent=4))
+    LOGGER.info(np.hstack((np.round(sig.pi, 2), marks)))
+
+    plot_adj(sig.L)
+
+    y_pred = np.argmax(sig.pi, axis=1)
+    y_pred_test = y_pred[graph.test_mask]
+    if y_pred_test.shape[0] > 0:
+        acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+    else:
+        acc = 0
+    LOGGER.info(acc)
+
+
+def plot_results(f_values, num_atoms, accuracies, atoms, save_path):
+    os.makedirs(save_path, exist_ok=True)
+    plt.figure()
+    plt.plot(f_values)
+    # plt.yscale("log")
+    plt.savefig(f"{save_path}loss.png")
+    plt.figure()
+    plt.plot(num_atoms)
+    plt.savefig(f"{save_path}num_atoms.png")
+    plt.figure()
+    plt.plot(accuracies)
+    plt.title("Accuracy")
+    plt.savefig(f"{save_path}accuracies.png")
+
+    plt.figure()
+    for id, atom in enumerate(atoms):
+        plt.plot(atom.e, "*-", label=f"atom {id}")
+    plt.legend()
+    plt.title("Eigenvectors")
+    plt.savefig(f"{save_path}eigenvectors.png")
+
+
+def save_model_params(atoms, coefs, graph, Lambda, Lp, save_path):
+    os.makedirs(save_path, exist_ok=True)
+    filename = f"{save_path}atoms.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(atoms, fid)
+
+    filename = f"{save_path}coefs.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(coefs, fid)
+    filename = f"{save_path}graph.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(graph, fid)
+
+    if config.ADMM:
+        filename = f"{save_path}Lambda.pkl"
+        with open(filename, "wb") as fid:
+            pkl.dump(Lambda, fid)
+
+        filename = f"{save_path}Lp.pkl"
+        with open(filename, "wb") as fid:
+            pkl.dump(Lp, fid)

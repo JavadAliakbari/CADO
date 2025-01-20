@@ -1,9 +1,9 @@
-mu1: 0.1
+mu1: 0.05
 mu2: 1
 eta: 0.02
 beta: 0.9
 local_iter: 1
-cogent_iters: 5000
+cogent_iters: 1500
 iter_or_cycles_to_find_next_atom: 3
 rho_min: 0.5                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
@@ -22,3 +22,7 @@ eps: 0.0
 Enhance: False
 Abar: True
 ADMM: True
+train_ratio: 0.5
+lr: 0.01
+p: 0.6
+q: 0.05

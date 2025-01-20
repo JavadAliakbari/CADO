@@ -23,8 +23,8 @@ if __name__ == "__main__":
     num_signal_features = 2
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    probs = np.full((c, c), 0.05)
-    np.fill_diagonal(probs, 0.4)
+    probs = np.full((c, c), config.q)
+    np.fill_diagonal(probs, config.p)
     # probs = np.eye(c)
     config.tau = n
     graph = SBM(
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         num_features,
         num_signal_features,
         # train_ratio=1,
-        train_ratio=0.1,
+        train_ratio=config.train_ratio,
     )
     plot_adj(graph.A, name="A")
 
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     R = graph.Ri_matrices
     b = graph.b
 
-    num_atoms = c + 1
+    num_atoms = c
     for i in range(num_atoms):
         atom0 = GraphAtom()
         atom0.initialize(n, num_features, c)
@@ -86,11 +86,12 @@ if __name__ == "__main__":
             for atom, coef in zip(atoms, coefs):
                 grad = f.calc_grad(sig)
                 grad_atom = atom.calc_grad(grad)
-                atom.update(grad_atom, 2 * coef * 0.1)  # Update atom
+                atom.update(grad_atom, 2 * coef * config.lr)  # Update atom
                 sig = atoms.calc_sig(coefs)  # Update signal
                 f_sig = f(sig)
                 f_values.append(f_sig)
-            atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
+            # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
+            coefs = Enhancemnet_step(atoms, f, coefs)
 
         if config.ADMM:
             # min Lp
@@ -136,70 +137,6 @@ if __name__ == "__main__":
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
 
-    CoGEnT_sig = atoms.calc_sig(coefs)
-    results = {
-        f"atom {id}": {
-            "e": str(np.round(atom.e, 2)),
-            "b": str(np.round(atom.b, 2)),
-            "R": str(np.round(np.linalg.eigvalsh(atom.R), 2)),
-            "λ": str(np.round(c, 2)),
-        }
-        for id, (c, atom) in enumerate(zip(coefs, atoms))
-    }
-
-    mask = np.argmax(CoGEnT_sig.pi, axis=1) == graph.y
-    # Replace True with ✔ and False with ✘
-    marks = np.array(["✔" if value else "✘" for value in mask])[:, None]
-
-    LOGGER.info(json.dumps(results, indent=4))
-    LOGGER.info(np.hstack((np.round(CoGEnT_sig.pi, 2), marks)))
-
-    plot_adj(CoGEnT_sig.L)
-
-    y_pred = np.argmax(CoGEnT_sig.pi, axis=1)
-    y_pred_test = y_pred[graph.test_mask]
-    if y_pred_test.shape[0] > 0:
-        acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
-    else:
-        acc = 0
-
-    plt.figure()
-    plt.plot(f_values)
-    # plt.yscale("log")
-    plt.savefig(f"{save_path}loss.png")
-    plt.figure()
-    plt.plot(num_atoms)
-    plt.savefig(f"{save_path}num_atoms.png")
-    plt.figure()
-    plt.plot(accuracies)
-    plt.title("Accuracy")
-    plt.savefig(f"{save_path}accuracies.png")
-
-    plt.figure()
-    for id, atom in enumerate(atoms):
-        plt.plot(atom.e, "*-", label=f"atom {id}")
-    plt.legend()
-    plt.title("Eigenvectors")
-    plt.savefig(f"{save_path}eigenvectors.png")
-
-    filename = f"{save_path}atoms.pkl"
-    with open(filename, "wb") as fid:
-        pkl.dump(atoms, fid)
-
-    filename = f"{save_path}coefs.pkl"
-    with open(filename, "wb") as fid:
-        pkl.dump(coefs, fid)
-    filename = f"{save_path}graph.pkl"
-    with open(filename, "wb") as fid:
-        pkl.dump(graph, fid)
-
-    if config.ADMM:
-        filename = f"{save_path}Lambda.pkl"
-        with open(filename, "wb") as fid:
-            pkl.dump(Lambda, fid)
-
-        filename = f"{save_path}Lp.pkl"
-        with open(filename, "wb") as fid:
-            pkl.dump(Lp, fid)
-
-    LOGGER.info(acc)
+    log_results(atoms, coefs, graph, results, save_path)
+    plot_results(f_values, num_atoms, accuracies, atoms, save_path)
+    save_model_params(atoms, coefs, graph, Lambda, Lp, save_path)
