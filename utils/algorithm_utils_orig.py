@@ -1,11 +1,8 @@
 from copy import deepcopy
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy as sc
 
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
-from Atom.sig import Sig
 from Graph_Atom.graph_atom import GraphAtom
 from Graph_Atom.graph_sig import EmptySig, GraphSig
 from Graph_Atom.graph_func import GraphFunc
@@ -27,125 +24,9 @@ def find_next_atom(grad: GraphSig, itr) -> GraphAtom:
 
     atom = GraphAtom()
     atom.initialize(n, d, c)
-    # atom.R = None
-
-    max_iter = (
-        config.iter_or_cycles_to_find_next_atom
-        if config.mu1 != 0 or config.mu2 != 0
-        else 1
-    )
-    th_old = np.inf
-
-    for it in range(max_iter):
-        epsilon, λ = update_e(grad, atom, it, itr)
-        atom.update_e(epsilon)
-
-        if config.mu1 != 0:
-            R = update_R(grad, atom, it, itr)
-            atom.update_R(R)
-
-        if config.mu2 != 0:
-            b = update_b(grad, atom)
-            atom.update_b(b)
-
-        th = grad.dot(atom.calc_sig_term())
-        if abs(th_old - th) < 1e-6:
-            break
-        th_old = th
+    λ = atom.conditional_gradient_update(grad, itr)
 
     return atom, λ
-
-
-## Step 1: Fix R and b, update epsilon
-def update_e(grad: GraphSig, atom: GraphAtom, iter=0, itr=0):
-    scale_factor = (config.rho_max / config.rho_min) ** 2
-    if atom.R is not None:
-        tmp1 = np.einsum("ijk,jk->i", grad.Rv, atom.R)
-    else:
-        tmp1 = 0
-
-    tmp1 /= scale_factor
-    # tmp1 /= grad.n
-    tmp2 = np.einsum("ij,j->i", grad.pi, atom.b)
-    tmp3 = grad.L + np.diag(tmp1 + tmp2)
-    # S, eigvecs = np.linalg.eigh(-tmp3)
-    N = tmp3.shape[0]
-    try:
-        λ, evecs_large = sc.linalg.eigh(-tmp3, subset_by_index=(N - 1, N - 1))
-        epsilon = evecs_large[:, 0]
-    except:
-        λ, evecs_large = np.linalg.eigh(-tmp3)
-        epsilon = evecs_large[:, -1]
-        λ = λ[-1]
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/e/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-        plt.figure()
-        plt.plot(epsilon, "-*")
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    return epsilon, λ
-
-
-## Step 2: Fix epsilon and b, update R
-def update_R(grad: GraphSig, atom: GraphAtom, iter, itr=0):
-    grad_R = np.einsum("ijk,i->jk", grad.Rv, atom.e**2)
-
-    S, U = np.linalg.eigh(grad_R)
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/R/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-
-        plt.figure()
-        plt.bar(np.arange(S.shape[0]), S)
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    mask1 = S < 0
-    S[mask1] = config.rho_max - config.rho_min
-    S[~mask1] = 0
-    R = U @ np.diag(S) @ U.T
-
-    return R
-
-
-## Step 2: Fix epsilon and b, update R
-def update_R2(grad: GraphSig, atom: GraphAtom, iter, itr=0):
-    grad_R = np.einsum("ijk,i->jk", grad, atom.e**2)
-
-    S, U = np.linalg.eigh(grad_R)
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/R/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-
-        plt.figure()
-        plt.bar(np.arange(S.shape[0]), S)
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    mask1 = S > config.rho_max
-    S[mask1] = config.rho_max
-    mask2 = S < config.rho_min
-    S[mask2] = config.rho_min
-    R = U @ np.diag(S) @ U.T
-
-    return R
-
-
-## Step 3: Fix epsilon and R, update b (closed-form solution)
-def update_b(grad: GraphSig, atom: GraphAtom):
-    a = np.einsum("i, ij-> j", atom.e**2, grad.pi)
-    b = np.zeros(grad.pi.shape[-1], dtype=float)
-    b[np.argmin(a)] = 1
-
-    return b
 
 
 def Gamma_line_search(atoms: Atoms, f: GraphFunc, coefs: Coefs):
@@ -208,12 +89,12 @@ def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs) -> int:
         c_new = project_to_simplex(new_coefs, config.tau)
         new_coefs = Coefs(c_new)
         if config.enhance:
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, ADMM=True)
         residual_sig = new_atoms.calc_sig(new_coefs)
         # single_sig = atoms[idx].calc_sig_term()
         # single_sig = coefs[idx] * single_sig
         # residual_sig = sig - single_sig
-        val = f(residual_sig)
+        val = f(residual_sig, ADMM=True)
 
         if val < min_val:
             min_val = val
@@ -255,6 +136,31 @@ def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
 
     # Line 7 of CoGEnT(Line Search)
     coefs.scale_coefficients(factor=gamma)
+
+    return atoms, coefs
+
+
+def update_coefs(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, lr, itr):
+    """
+    Perform a forward step in the CoGEnT algorithm.
+
+    Parameters:
+    atoms (Atoms): The current set of atoms.
+    f (GraphFunc): The graph function used to calculate the gradient.
+    coefs (Coefs): The coefficients associated with the atoms.
+    sig: The signal or data used for gradient calculation.
+    itr (int): The current iteration number.
+
+    Returns:
+    Coefs: The updated coefficients after the forward step.
+    """
+
+    for _ in range(itr):
+        grad = f.calc_grad(sig)
+        g = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
+        c_new = project_to_simplex(coefs.get_coefs() - lr * g, config.tau)
+        coefs.update_coefficients(c_new)
+        sig = atoms.calc_sig(coefs)
 
     return atoms, coefs
 
@@ -379,13 +285,28 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
         if len(new_coefs) > 0:
             new_c = project_to_simplex(new_coefs, config.tau)
             new_coefs.update_coefficients(new_c)
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, ADMM=True)
             new_sig = new_atoms.calc_sig(new_coefs)
-            f_new_sig = f(new_sig)
+
+            if config.ADMM:
+                # min Lp
+                new_f = deepcopy(f)
+                Lambda = new_f.Lambda
+                Lp = Lambda / config.beta + new_sig.L
+                Lp = project_to_bound(Lp)
+
+                # max Lambda
+                d = new_sig.L - Lp
+                Lambda += config.beta * d
+
+                new_f.set_ADMM_params(Lambda, Lp)
+
+            f_new_sig = new_f(new_sig, ADMM=True)
 
             if f_new_sig <= F_th:
                 atoms = new_atoms
                 coefs = new_coefs
+                f = new_f
                 # if config.ADMM:
                 #     # min Lp
                 #     # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
@@ -404,7 +325,7 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
         else:
             terminate = True
 
-    return atoms, coefs
+    return atoms, coefs, f
 
 
 def Matrix_Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):

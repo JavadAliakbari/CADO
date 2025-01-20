@@ -74,7 +74,7 @@ if __name__ == "__main__":
     coefs = Coefs()
     sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
-    f_sig = f(sig)
+    f_sig = f(sig, ADMM=True)
 
     if config.ADMM:
         Lambda = np.zeros((n, n))
@@ -98,13 +98,13 @@ if __name__ == "__main__":
             # if sum(coefs) >= n:
             #     atoms, coefs = Enhance_step(atoms, coefs)
 
-            coefs = Enhancemnet_step(atoms, f, coefs)
+            coefs = Enhancemnet_step(atoms, f, coefs, ADMM=True)
 
             sig = atoms.calc_sig(coefs)
-            f_sig_new = f(sig)
+            f_sig_new = f(sig, ADMM=True)
             F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
-            atoms, coefs = Truncate(atoms, f, coefs, F_th)
+            atoms, coefs, f = Truncate(atoms, f, coefs, F_th)
             # if len(num_atoms) > 2:
             #     atoms, coefs = Matrix_Truncate(atoms, f, coefs, F_th)
             sig = atoms.calc_sig(coefs)
@@ -112,19 +112,20 @@ if __name__ == "__main__":
         if config.ADMM:
             # min Lp
             # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
+            Lp = f.Lp
+            Lambda = f.Lambda
             Lp = Lambda / config.beta + sig.L
             Lp = project_to_bound(Lp)
 
             # max Lambda
             d = sig.L - Lp
-            Lambda += config.beta * d / n
-
+            Lambda += config.beta * d
             diff = matrix_dot_product(d, d)
 
             lambda_term = matrix_dot_product(Lambda, d)
 
             f.set_ADMM_params(Lambda, Lp)
-        f_sig = f(sig)
+        f_sig = f(sig, ADMM=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]

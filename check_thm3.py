@@ -46,13 +46,13 @@ def create_sig(E, R, b, λ):
 
     for i in range(c):
         atom0 = GraphAtom()
-        # S, U = np.linalg.eigh(R[i])
-        # mask = S >= config.sig_rho_max - 0.0000001
-        # S[mask] = config.rho_max - config.rho_min
-        # S[~mask] = 0
+        S, U = np.linalg.eigh(R[i])
+        mask = S >= config.sig_rho_max - 0.0000001
+        S[mask] = config.rho_max - config.rho_min
+        S[~mask] = 0
 
-        # RR = U @ np.diag(S) @ U.T
-        atom0.set_params(E[:, i], R[i], b[i])
+        RR = U @ np.diag(S) @ U.T
+        atom0.set_params(E[:, i], RR[i], b[i])
         atoms.add_atom(atom0)
         coefs.add_coef(λ[i])
     sig = atoms.calc_sig(coefs)

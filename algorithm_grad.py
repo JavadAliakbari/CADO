@@ -70,7 +70,7 @@ def update_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
         atom: GraphAtom = atoms[-1]
         grad_R = np.einsum("ijk,i->jk", grad.Rv, atom.e**2)
         Rp = atom.R - 0.01 * grad_R
-        Rp = project_to_set_S(Rp, config.rho_min, config.rho_max)
+        Rp = project_to_psd_cone(Rp, config.rho_min, config.rho_max)
         atom.R = Rp
 
 

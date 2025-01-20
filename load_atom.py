@@ -11,7 +11,7 @@ from Graph_Atom.graph_func import GraphFunc
 from utils.utils import *
 from utils.algorithm_utils_orig import *
 
-path = "results/20250119_032339/"
+path = "results/20250119_221156/"
 
 atoms_path = f"{path}atoms.pkl"
 coefs_path = f"{path}coefs.pkl"
@@ -37,7 +37,7 @@ f = GraphFunc(graph=graph)
 f.set_ADMM_params(Lambda, Lp)
 
 sig = atoms.calc_sig(coefs)
-f_sig = f(sig)
+f_sig = f(sig, ADMM=False)
 print(f_sig)
 
 bar = tqdm(total=config.cogent_iters)
@@ -53,10 +53,10 @@ for ii in range(config.cogent_iters):
         # if sum(coefs) >= n:
         #     atoms, coefs = Enhance_step(atoms, coefs)
 
-        coefs = Enhancemnet_step(atoms, f, coefs)
+        coefs = Enhancemnet_step(atoms, f, coefs, ADMM=False)
 
         sig = atoms.calc_sig(coefs)
-        f_sig_new = f(sig)
+        f_sig_new = f(sig, ADMM=False)
         F_th = config.eta * f_sig + (1 - config.eta) * f_sig_new
 
         atoms, coefs = Truncate(atoms, f, coefs, F_th)
@@ -79,7 +79,7 @@ for ii in range(config.cogent_iters):
         lambda_term = matrix_dot_product(Lambda, d)
 
         f.set_ADMM_params(Lambda, Lp)
-    f_sig = f(sig)
+    f_sig = f(sig, ADMM=False)
 
     y_pred = np.argmax(sig.pi, axis=1)
     y_pred_test = y_pred[graph.test_mask]

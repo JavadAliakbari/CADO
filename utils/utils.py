@@ -1,6 +1,5 @@
 from datetime import datetime
 import os
-import random
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -198,33 +197,36 @@ def create_multiple_noisy_probability_vectors(
     return np.array(probability_vectors)
 
 
-def project_to_set_S(matrix, eigen_min, eigen_max):
+def project_to_unit_vector(vector):
     """
-    Project a matrix onto the set of symmetric matrices with eigenvalues
-    constrained between eigen_min and eigen_max.
+    Project a vector onto the unit vector.
+
+    Parameters:
+    vector (np.ndarray): The input vector to be projected.
+
+    Returns:
+    np.ndarray: The projected unit vector.
+    """
+    return vector / np.linalg.norm(vector)
+
+
+def project_to_psd_cone(matrix, rho_minus, rho_plus):
+    """
+    Project a matrix onto the positive semidefinite cone.
 
     Parameters:
     matrix (np.ndarray): The input matrix to be projected.
-    eigen_min (float): The minimum eigenvalue bound.
-    eigen_max (float): The maximum eigenvalue bound.
 
     Returns:
-    np.ndarray: The projected symmetric matrix with eigenvalues in the specified range.
+    np.ndarray: The projected positive semidefinite matrix.
     """
-    # Step 1: Symmetrize the matrix
-    # sym_matrix = (matrix + matrix.T) / 2
-
-    # Step 2: Perform eigenvalue decomposition
+    # Perform eigenvalue decomposition
     eigenvalues, eigenvectors = np.linalg.eigh(matrix)
 
-    # Step 3: Clip the eigenvalues to the specified range [eigen_min, eigen_max]
-    clipped_eigenvalues = np.clip(eigenvalues, eigen_min, eigen_max)
-    # mid_value = eigen_min + (eigen_max - eigen_min) / 2
-    # cond1 = (eigenvalues < mid_value) & (eigenvalues > eigen_min)
-    # cond2 = (eigenvalues > mid_value) & (eigenvalues < eigen_max)
-    # eigenvalues[cond1] = eigen_min
-    # eigenvalues[cond2] = eigen_max
-    # Step 4: Reconstruct the matrix using the clipped eigenvalues
+    # Clip the eigenvalues to ensure they are non-negative
+    clipped_eigenvalues = np.clip(eigenvalues, rho_minus, rho_plus)
+
+    # Reconstruct the matrix using the clipped eigenvalues
     projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T
 
     return projected_matrix
