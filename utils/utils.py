@@ -414,7 +414,9 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     LOGGER.info(acc)
 
 
-def plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt=None):
+def plot_results(
+    f_values, num_atoms, accuracies, Lambda_norms, atoms, Lambda, save_path, f_opt=None
+):
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
     plt.plot(f_values)
@@ -428,6 +430,10 @@ def plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt=None):
     plt.plot(accuracies)
     plt.title("Accuracy")
     plt.savefig(f"{save_path}accuracies.png")
+    plt.figure()
+    plt.plot(Lambda_norms)
+    plt.title("Lambda norms")
+    plt.savefig(f"{save_path}Lambda_norms.png")
 
     plt.figure()
     for id, atom in enumerate(atoms):
@@ -435,6 +441,8 @@ def plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt=None):
     plt.legend()
     plt.title("Eigenvectors")
     plt.savefig(f"{save_path}eigenvectors.png")
+
+    plot_adj(Lambda, name="Lambda")
 
 
 def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):

@@ -136,7 +136,7 @@ def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
         gamma = 2 / (itr + 3)
 
     # Line 7 of CoGEnT(Line Search)
-    coefs.scale_coefficients(factor=gamma)
+    coefs.scale_coefficients(factor=gamma, id=len(coefs) - 1)
 
     return atoms, coefs
 
@@ -289,25 +289,25 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
             new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, ADMM=True)
             new_sig = new_atoms.calc_sig(new_coefs)
 
-            if config.ADMM:
-                # min Lp
-                new_f = deepcopy(f)
-                Lambda = new_f.Lambda
-                Lp = Lambda / config.beta + new_sig.L
-                Lp = project_to_bound(Lp)
+            # if config.ADMM:
+            #     # min Lp
+            #     new_f = deepcopy(f)
+            #     Lambda = new_f.Lambda
+            #     Lp = Lambda / config.beta + new_sig.L
+            #     Lp = project_to_bound(Lp)
 
-                # max Lambda
-                d = new_sig.L - Lp
-                Lambda += config.beta * d
+            #     # max Lambda
+            #     d = new_sig.L - Lp
+            #     Lambda += config.beta * d
 
-                new_f.set_ADMM_params(Lambda, Lp)
+            #     new_f.set_ADMM_params(Lambda, Lp)
 
-            f_new_sig = new_f(new_sig, ADMM=True)
+            f_new_sig = f(new_sig, ADMM=True)
 
             if f_new_sig <= F_th:
                 atoms = new_atoms
                 coefs = new_coefs
-                f = new_f
+                # f = new_f
                 # if config.ADMM:
                 #     # min Lp
                 #     # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))

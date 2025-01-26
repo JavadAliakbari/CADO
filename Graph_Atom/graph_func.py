@@ -10,8 +10,6 @@ class GraphFunc(f):
         graph: Graph,
     ) -> None:
         self.graph: Graph = graph
-        self.Lambda = None
-        self.Lp = None
         self.admm = None
 
     def set_ADMM_params(self, admm):

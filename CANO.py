@@ -42,6 +42,7 @@ def CANO(graph, log_results=True):
     accuracies = []
     diff_vals = []
     Lambda_terms = []
+    Lambda_norms = []
     num_atoms_list = []
     diff = 0
     for ii in range(config.cogent_iters):
@@ -82,11 +83,13 @@ def CANO(graph, log_results=True):
 
         if admm is not None:
             if config.ADMM == "L":
-                diff, lambda_term = admm.ADMM_update(sig.L)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
-                diff, lambda_term = admm.ADMM_update(sig.pi)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
+            Lambda_norms.append(lambda_norm)
+
         f_sig = f(sig)
 
         y_pred = np.argmax(sig.pi, axis=1)
@@ -102,6 +105,7 @@ def CANO(graph, log_results=True):
             "acc": acc,
             "diff": diff,
             "lambda term": lambda_term,
+            "lambda norm": f"{lambda_norm:,.4f}",
         }
 
         if log_results:
@@ -121,4 +125,5 @@ def CANO(graph, log_results=True):
         accuracies,
         f_opt,
         admm,
+        Lambda_norms,
     )

@@ -38,10 +38,28 @@ if __name__ == "__main__":
     # plt.show()
     a = 2
 
-    atoms, coefs, graph, results, f_values, num_atoms_list, accuracies, f_opt, admm = (
-        CANO(graph)
-    )
+    (
+        atoms,
+        coefs,
+        graph,
+        results,
+        f_values,
+        num_atoms_list,
+        accuracies,
+        f_opt,
+        admm,
+        Lambda_norms,
+    ) = CANO(graph)
 
     log_results(atoms, coefs, graph, results, save_path)
-    plot_results(f_values, num_atoms_list, accuracies, atoms, save_path, f_opt)
+    plot_results(
+        f_values,
+        num_atoms_list,
+        accuracies,
+        Lambda_norms,
+        atoms,
+        admm.Lambda,
+        save_path,
+        f_opt,
+    )
     save_model_params(atoms, coefs, graph, admm, save_path)

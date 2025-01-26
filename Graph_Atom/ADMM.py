@@ -9,6 +9,13 @@ class ADMM_cls:
         self.Lp = constrint_func(self.Lp)
         self.Lp_prev = None
 
+        # path = "results/20250126_021049/"
+
+        # Lambda_path = f"{path}Lambda.pkl"
+
+        # with open(Lambda_path, "rb") as fid:
+        #     self.Lambda = pkl.load(fid)
+
     def adaptive_admm_update(primal_residual, dual_residual, rho, alpha=1.5):
         """
         Update the penalty parameter rho adaptively based on the primal and dual residuals.
@@ -31,8 +38,8 @@ class ADMM_cls:
     def admm_value(self, L):
         n = L.shape[1]
         d = L - self.Lp
-        primal_term = matrix_dot_product(d, d) / n
-        lambda_term = matrix_dot_product(self.Lambda, d) / n
+        primal_term = matrix_dot_product(d, d)
+        lambda_term = matrix_dot_product(self.Lambda, d)
         return lambda_term + config.beta / 2 * primal_term
 
     def ADMM_update(self, L):
@@ -47,6 +54,7 @@ class ADMM_cls:
         diff = matrix_dot_product(d, d)
 
         lambda_term = matrix_dot_product(self.Lambda, d)
+        lambda_norm = np.linalg.norm(self.Lambda)
 
         # # Adaptive ADMM update
         # primal_residual = np.linalg.norm(d)
@@ -55,7 +63,7 @@ class ADMM_cls:
         #     primal_residual, dual_residual, config.beta
         # )
 
-        return diff, lambda_term
+        return diff, lambda_term, lambda_norm
 
     def calc_grad(self, L):
-        return L - self.Lp + self.Lambda / config.beta
+        return config.beta * (L - self.Lp) + self.Lambda
