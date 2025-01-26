@@ -7,6 +7,7 @@ from utils.SBM import SBM
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
 from Graph_Atom.graph_func import GraphFunc
+from Graph_Atom.ADMM import ADMM_cls
 
 from Graph_Atom.graph_sig import EmptySig
 from utils.algorithm_utils_orig import *
@@ -37,43 +38,35 @@ if __name__ == "__main__":
     )
     plot_adj(graph.A, name="A")
 
-    ## Initialization
-    atoms = Atoms()
-    coefs = Coefs()
+    E = graph.E
+    R = graph.Ri_matrices
+    b = graph.b
+    opt_sig = create_sig(E, R, b, graph.λ)
 
     E = graph.E
     # E[np.abs(E) < 0.00001] = 0.00001
     R = graph.Ri_matrices
     b = graph.b
 
-    num_atoms = c
-    for i in range(num_atoms):
-        atom0 = GraphAtom()
-        atom0.initialize(n, num_features, c)
-        # S, U = np.linalg.eigh(R[i])
-        # mask = S >= config.sig_rho_max - 0.0000001
-        # S[mask] = config.rho_max - config.rho_min
-        # S[~mask] = 0
-
-        # RR = U @ np.diag(S) @ U.T
-        # atom0.set_params(E[:, i], RR, b[i])
-        atoms.add_atom(atom0)
-    coefs = n * np.random.rand(num_atoms)
-    coefs = project_to_simplex(coefs, n)
-    coefs = Coefs(coefs)
-    # coefs.add_coef(graph.λ[i])
+    ## Initialization
+    # atoms, coefs = create_random_atoms()
+    atoms, coefs = create_optimal_atoms(graph)
+    num_atoms = len(atoms)
 
     sig = atoms.calc_sig(coefs)
     # sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
+    if config.ADMM == "L":
+        admm = ADMM_cls(sig.L, project_to_bound)
+        f.set_ADMM_params(admm)
+    elif config.ADMM == "pi":
+        admm = ADMM_cls(sig.pi, project_to_simplex)
+        f.set_ADMM_params(admm)
+    else:  # config.ADMM == "None"
+        admm = None
+
+    f_opt = f(opt_sig)
     f_sig = f(sig)
-
-    if config.ADMM:
-        Lambda = np.zeros((n, n))
-        Lp = sig.L
-        Lp = project_to_bound(Lp)
-
-        f.set_ADMM_params(Lambda, Lp)
 
     bar = tqdm(total=config.cogent_iters)
     f_values = []
@@ -93,21 +86,13 @@ if __name__ == "__main__":
             # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
             coefs = Enhancemnet_step(atoms, f, coefs)
 
-        if config.ADMM:
-            # min Lp
-            Lp = f.Lp
-            Lambda = f.Lambda
-            Lp = Lambda / config.beta + sig.L
-            Lp = project_to_bound(Lp)
-
-            # max Lambda
-            d = sig.L - Lp
-            Lambda += config.beta * d
-            diff = matrix_dot_product(d, d)
-
-            lambda_term = matrix_dot_product(Lambda, d)
-
-            f.set_ADMM_params(Lambda, Lp)
+        if admm is not None:
+            if config.ADMM == "L":
+                diff, lambda_term = admm.ADMM_update(sig.L)
+            elif config.ADMM == "pi":
+                diff, lambda_term = admm.ADMM_update(sig.pi)
+            diff_vals.append(diff)
+            Lambda_terms.append(lambda_term)
         f_sig = f(sig)
 
         y_pred = np.argmax(sig.pi, axis=1)
@@ -121,22 +106,17 @@ if __name__ == "__main__":
             "num atoms": len(atoms),
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
+            "diff": diff,
+            "lambda term": lambda_term,
         }
 
-        if config.ADMM:
-            results["diff"] = diff
-            results["lambda term"] = lambda_term
-
-        bar.set_postfix(results)
-        bar.update()
+        if log_results:
+            bar.set_postfix(results)
+            bar.update()
         f_values.append(f_sig)
         num_atoms.append(len(atoms))
         accuracies.append(acc)
 
-        if config.ADMM:
-            diff_vals.append(diff)
-            Lambda_terms.append(lambda_term)
-
     log_results(atoms, coefs, graph, results, save_path)
-    plot_results(f_values, num_atoms, accuracies, atoms, save_path)
-    save_model_params(atoms, coefs, graph, Lambda, Lp, save_path)
+    plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt)
+    save_model_params(atoms, coefs, graph, admm, save_path)

@@ -1,5 +1,6 @@
 from copy import deepcopy
 import numpy as np
+from sklearn.cluster import SpectralClustering
 
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
@@ -357,3 +358,79 @@ def Matrix_Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
             return new_atoms, new_coefs
 
     return atoms, coefs
+
+
+def create_sig(E, R, b, λ):
+    ## Initialization
+    atoms = Atoms()
+    coefs = Coefs()
+
+    for i in range(b.shape[1]):
+        atom0 = GraphAtom()
+        S, U = np.linalg.eigh(R[i])
+        mask = S >= config.sig_rho_max - 0.0000001
+        S[mask] = config.rho_max - config.rho_min
+        S[~mask] = 0
+
+        RR = U @ np.diag(S) @ U.T
+        atom0.set_params(E[:, i], RR, b[i])
+        atoms.add_atom(atom0)
+        coefs.add_coef(λ[i])
+    sig = atoms.calc_sig(coefs)
+    return sig
+
+
+def create_random_atoms(n, d, c, num_atoms):
+    atoms = Atoms()
+    coefs = Coefs()
+    for _ in range(num_atoms):
+        atom = GraphAtom()
+        atom.initialize(n, d, c)
+        atoms.add_atom(atom)
+
+    coefs = n * np.random.rand(num_atoms)
+    coefs = project_to_simplex(coefs, n)
+    coefs = Coefs(coefs)
+    return atoms, coefs
+
+
+def create_optimal_atoms(graph: Graph):
+    atoms = Atoms()
+    coefs = Coefs()
+    E = graph.E
+    # E[np.abs(E) < 0.00001] = 0.00001
+    R = graph.Ri_matrices
+    b = graph.b
+    c = graph.num_classes
+
+    for i in range(c):
+        atom0 = GraphAtom()
+        S, U = np.linalg.eigh(R[i])
+        mask = S >= config.sig_rho_max - 0.0000001
+        S[mask] = config.rho_max - config.rho_min
+        S[~mask] = 0
+
+        RR = U @ np.diag(S) @ U.T
+        atom0.set_params(E[:, i], RR, b[i])
+        atoms.add_atom(atom0)
+        coefs.add_coef(graph.λ[i])
+    return atoms, coefs
+
+
+def run_spectral_clustering(graph, n_clusters):
+    """
+    Run spectral clustering on the graph's adjacency matrix.
+
+    Args:
+        graph (SBM): The graph object.
+        n_clusters (int): The number of clusters.
+
+    Returns:
+        np.ndarray: The cluster labels for each node.
+    """
+    adjacency_matrix = graph.A
+    spectral = SpectralClustering(
+        n_clusters=n_clusters, affinity="precomputed", assign_labels="kmeans"
+    )
+    labels = spectral.fit_predict(adjacency_matrix)
+    return labels

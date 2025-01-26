@@ -2,18 +2,20 @@ from datetime import datetime
 import json
 import pickle as pkl
 import os
+import random
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import cvxpy as cp
 
+from Graph_Atom import ADMM
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
-# seed = 45
-# random.seed(seed)
-# np.random.seed(seed)
+seed = 45
+random.seed(seed)
+np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -227,7 +229,7 @@ def project_to_psd_cone(matrix, rho_minus, rho_plus):
     return projected_matrix
 
 
-def project_to_simplex(y, a):
+def project_to_simplex(y, a=1):
     return project_to_simplex2(y, a)
     # return y
     """
@@ -412,10 +414,11 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     LOGGER.info(acc)
 
 
-def plot_results(f_values, num_atoms, accuracies, atoms, save_path):
+def plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt=None):
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
     plt.plot(f_values)
+    plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
     plt.figure()
@@ -434,7 +437,7 @@ def plot_results(f_values, num_atoms, accuracies, atoms, save_path):
     plt.savefig(f"{save_path}eigenvectors.png")
 
 
-def save_model_params(atoms, coefs, graph, Lambda, Lp, save_path):
+def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):
     os.makedirs(save_path, exist_ok=True)
     filename = f"{save_path}atoms.pkl"
     with open(filename, "wb") as fid:
@@ -450,8 +453,8 @@ def save_model_params(atoms, coefs, graph, Lambda, Lp, save_path):
     if config.ADMM:
         filename = f"{save_path}Lambda.pkl"
         with open(filename, "wb") as fid:
-            pkl.dump(Lambda, fid)
+            pkl.dump(admm.Lambda, fid)
 
         filename = f"{save_path}Lp.pkl"
         with open(filename, "wb") as fid:
-            pkl.dump(Lp, fid)
+            pkl.dump(admm.Lp, fid)

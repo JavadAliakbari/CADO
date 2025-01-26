@@ -2,6 +2,7 @@ from typing import List
 from Atom.atom import Atom
 from Atom.coefs import Coefs
 from Atom.sig import Sig
+import itertools
 
 from utils.utils import *
 
@@ -20,6 +21,15 @@ class Atoms:
 
     def __getitem__(self, idx):
         return self.atoms[idx]
+
+    def shuffle(self):
+        np.random.shuffle(self.atoms)
+
+    def rearnge(self, idxs):
+        self.atoms = [self.atoms[i] for i in idxs]
+
+    def __setitem__(self, idx, atom):
+        self.atoms[idx] = atom
 
     def add_atom(self, atom: Atom):
         self.atoms.append(atom)

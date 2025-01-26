@@ -23,6 +23,12 @@ class Coefs:
     def __setitem__(self, idx, value):
         self.coefs[idx] = value
 
+    def shuffle(self):
+        np.random.shuffle(self.coefs)
+
+    def rearnge(self, idxs):
+        self.coefs = [self.coefs[i] for i in idxs]
+
     def __lt__(self, other):
         if isinstance(other, Coefs):
             return self.coefs < other.coefs
@@ -30,14 +36,20 @@ class Coefs:
 
     @property
     def ndim(self):
-        return self.coefs.ndim  # Return the number of dimensions
+        return 1
 
-    def scale_coefficients(self, factor):
+    def scale_coefficients(self, factor, id):
         # s = np.sum(self.coefs)
-        self.coefs[:-1] *= 1 - factor
-        self.coefs[-1] *= factor
+        for ind in range(len(self.coefs)):
+            if ind == id:
+                self.coefs[ind] *= factor
+            else:
+                self.coefs[ind] *= 1 - factor
+        # self.coefs[:-1] *= 1 - factor
+        # self.coefs[-1] *= factor
+        # [coef for ind, coef in enumerate(self.coefs) if coef < 0] = 0
 
-        self.coefs = project_to_simplex2(self.coefs, config.tau)
+        self.coefs = project_to_simplex2(self, config.tau)
 
     def update_coefficients(self, coefs):
         if not isinstance(coefs, np.ndarray):

@@ -12,35 +12,10 @@ class GraphFunc(f):
         self.graph: Graph = graph
         self.Lambda = None
         self.Lp = None
+        self.admm = None
 
-    def set_ADMM_params(self, Lambda, Lp):
-        self.Lambda = Lambda
-        self.Lp = Lp
-
-    # def __call__(self, signal: GraphSig):
-    #     if signal is None:
-    #         return 0
-    #     # term_1 = -matrix_dot_product(self.graph.A, signal.L)
-    #     r = self.graph.A - signal.L
-    #     term_1 = 0.5 * matrix_dot_product(r, r)
-
-    #     # term2
-    #     if signal.Rz is None:
-    #         signal.solve_R(self.graph.X)
-
-    #     term_2 = matrix_dot_product(self.graph.X, signal.Rz)
-
-    #     # term3
-    #     # term_3 = np.sum(np.log(np.linalg.det(signal.Rv)))
-    #     term_3 = np.trace(np.sum(signal.Rv, axis=0))
-
-    #     # term4
-    #     train_labels = self.graph.y[self.graph.train_mask]
-    #     train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
-    #     term_4 = np.sum(signal.pi[train_nodes, train_labels])
-    #     obj = term_1 + config.mu1 * term_2 + config.mu1 * term_3 - config.mu2 * term_4
-
-    #     return obj
+    def set_ADMM_params(self, admm):
+        self.admm = admm
 
     def __call__(self, signal: GraphSig, ADMM=config.ADMM):
         if signal is None:
@@ -77,25 +52,19 @@ class GraphFunc(f):
             term_4 = 0
 
         # term5
-        if ADMM and self.Lp is not None:
-            d = signal.L - self.Lp
-            term_5 = matrix_dot_product(self.Lambda, d) / signal.n
+        if self.admm is not None and ADMM == "L":
+            admm_term = self.admm.admm_value(signal.L)
+        elif self.admm is not None and ADMM == "pi":
+            admm_term = self.admm.admm_value(signal.pi)
         else:
-            term_5 = 0
-
-        # term6
-        if ADMM and self.Lp is not None and self.Lambda is not None:
-            term_6 = matrix_dot_product(d, d) / signal.n
-        else:
-            term_6 = 0
+            admm_term = 0
 
         obj = (
             term_1
             + config.mu1 * term_2
             + config.mu1 * term_3
             - config.mu2 * term_4
-            + term_5
-            + (config.beta / 2) * term_6
+            + admm_term
         )
 
         return obj
@@ -106,47 +75,23 @@ class GraphFunc(f):
     def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
         if signal is None:
             return 0
-        # grad_L = self.calc_grad_L(signal, ADMM=ADMM)
-        # grad_R = self.calc_grad_R(signal)
-        # grad_pi = self.calc_grad_pi(signal)
         grad_L = self.calc_grad_L(signal, ADMM=ADMM) / signal.n
         grad_R = self.calc_grad_R(signal) / signal.d
-        grad_pi = self.calc_grad_pi(signal) / signal.c
-
-        grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
-        return grad
-
-    def calc_grad_signal(self, signal, ADMM=config.ADMM) -> GraphSig:
-        if signal is None:
-            return 0
-        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / signal.n
-        grad_R = self.calc_grad_R(signal) / signal.d
-        grad_pi = self.calc_grad_pi(signal) / signal.c
+        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / signal.c
 
         grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad
 
     def calc_grad_L(self, signal: GraphSig, ADMM=config.ADMM):
-
-        if ADMM and self.Lambda is not None:
-            grad_lambda = self.Lambda
+        if self.admm is not None and ADMM == "L":
+            grad_admm = self.admm.calc_grad(signal.L)
         else:
-            grad_lambda = 0
-
-        if ADMM and self.Lp is not None:
-            grad_Lp = self.Lp
-        else:
-            grad_Lp = 0
+            grad_admm = 0
 
         if config.Abar:
-            return -self.graph.Abar + grad_lambda + config.beta * (signal.L - grad_Lp)
+            return -self.graph.Abar + grad_admm
         else:
-            return (
-                -self.graph.A
-                + signal.L
-                + grad_lambda
-                + config.beta * (signal.L - grad_Lp)
-            )
+            return -self.graph.A + signal.L + grad_admm
         # return self.graph.A
 
     # def calc_grad_R(self, signal: GraphSig):
@@ -172,7 +117,7 @@ class GraphFunc(f):
 
         return config.mu1 * gradient_Rv
 
-    def calc_grad_pi(self, signal):
+    def calc_grad_pi(self, signal, ADMM=config.ADMM):
         # Third block: Gradient with respect to pi_kv
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
@@ -182,4 +127,9 @@ class GraphFunc(f):
         train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
         gradient_pi[train_nodes, train_labels] = 1
 
-        return -config.mu2 * gradient_pi
+        if self.admm is not None and ADMM == "pi":
+            grad_admm = self.admm.calc_grad(signal.pi)
+        else:
+            grad_admm = 0
+
+        return -config.mu2 * gradient_pi - grad_admm
