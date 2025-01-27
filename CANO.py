@@ -3,7 +3,6 @@ from tqdm import tqdm
 
 from Graph_Atom.ADMM import ADMM_cls
 from Graph_Atom.graph_func import GraphFunc
-
 from utils.algorithm_utils_orig import *
 from utils.utils import *
 
@@ -17,7 +16,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
-    # coefs = coefs_opt
+    coefs = coefs_opt
     # atoms = atoms_opt
 
     sig = atoms.calc_sig(coefs)
@@ -37,16 +36,15 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     else:
         f.set_ADMM_params(admm)
 
-    f_sig = f(sig)
+    f_sig = f(sig, ADMM=False)
 
-    if log_results:
-        bar = tqdm(total=config.cogent_iters)
-    f_values = []
+    # if log_results:
+    bar = tqdm(total=config.cogent_iters, leave=False)
+    f_values = [f_sig]
     accuracies = []
     diff_vals = []
     Lambda_terms = []
-    Lambda_norms = []
-    num_atoms_list = []
+    Lambda_norms = [np.linalg.norm(admm.Lambda)]
     diff = 0
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
@@ -82,13 +80,13 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                 f_sig = f(sig)
                 f_values.append(f_sig)
                 # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
-                coefs = Enhancemnet_step(atoms, f, coefs)
+                # coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
             if config.ADMM == "L":
-                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L, ii)
             elif config.ADMM == "pi":
-                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi, ii)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
             Lambda_norms.append(lambda_norm)
@@ -103,7 +101,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             acc = 1
 
         results = {
-            "num atoms": len(atoms),
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
             "diff": diff,
@@ -112,12 +109,20 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             "beta": config.beta,
         }
 
-        if log_results:
-            bar.set_postfix(results)
-            bar.update()
+        # if log_results:
+        bar.set_postfix(results)
+        bar.update()
         f_values.append(f_sig)
-        num_atoms_list.append(len(atoms))
         accuracies.append(acc)
+
+        # check if the algorithm converged:
+        if (
+            ii > 0
+            and np.abs(f_values[-1] - f_values[-2]) < 1e-4
+            and np.abs(Lambda_terms[-1]) < 1e-3
+            and np.abs(diff_vals[-1]) < 1e-5
+        ):
+            break
 
     return (
         atoms,
@@ -125,7 +130,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         graph,
         results,
         f_values,
-        num_atoms_list,
         accuracies,
         f_opt,
         admm,

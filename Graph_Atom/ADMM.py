@@ -1,4 +1,5 @@
 from copy import deepcopy
+
 from utils.utils import *
 
 
@@ -17,7 +18,9 @@ class ADMM_cls:
         # with open(Lambda_path, "rb") as fid:
         #     self.Lambda = pkl.load(fid)
 
-    def adaptive_admm_update(self, primal_residual, dual_residual, rho, alpha=1.1):
+    def adaptive_admm_update(
+        self, primal_residual, dual_residual, rho, alpha=1.05, mu=100
+    ):
         return rho
         """
         Update the penalty parameter rho adaptively based on the primal and dual residuals.
@@ -31,9 +34,9 @@ class ADMM_cls:
         Returns:
             float: The updated penalty parameter rho.
         """
-        if primal_residual > 100 * dual_residual:
+        if primal_residual > mu * dual_residual:
             rho *= alpha
-        elif dual_residual > 100 * primal_residual:
+        elif dual_residual > mu * primal_residual:
             rho /= alpha
         return rho
 
@@ -44,7 +47,7 @@ class ADMM_cls:
         lambda_term = matrix_dot_product(self.Lambda, d)
         return lambda_term + config.beta / 2 * primal_term
 
-    def ADMM_update(self, L):
+    def ADMM_update(self, L, itr):
         # min Lp
         self.Lp_prev = self.Lp
         self.Lp = self.Lambda / config.beta + L
@@ -59,11 +62,11 @@ class ADMM_cls:
         lambda_norm = np.linalg.norm(self.Lambda)
 
         # # Adaptive ADMM update
-        primal_residual = np.linalg.norm(d)
-        dual_residual = np.linalg.norm(config.beta * (self.Lp - self.Lp_prev))
-        config.beta = self.adaptive_admm_update(
-            primal_residual, dual_residual, config.beta
-        )
+        # primal_residual = np.linalg.norm(d)
+        # dual_residual = np.linalg.norm(config.beta * (self.Lp - self.Lp_prev))
+        # config.beta = self.adaptive_admm_update(
+        #     primal_residual, dual_residual, config.beta,
+        # )
 
         return diff, lambda_term, lambda_norm
 

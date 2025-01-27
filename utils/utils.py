@@ -1,21 +1,22 @@
 from datetime import datetime
 import json
-import pickle as pkl
 import os
+import pickle as pkl
 import random
+
+import cvxpy as cp
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
-import cvxpy as cp
 
 from Graph_Atom import ADMM
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
-seed = 4
-random.seed(seed)
-np.random.seed(seed)
+# seed = 4
+# random.seed(seed)
+# np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -415,7 +416,7 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
 
 
 def plot_results(
-    f_values, num_atoms, accuracies, Lambda_norms, atoms, Lambda, save_path, f_opt=None
+    f_values, accuracies, Lambda_norms, atoms, Lambda, save_path, f_opt=None
 ):
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
@@ -425,9 +426,6 @@ def plot_results(
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
-    plt.figure()
-    plt.plot(num_atoms)
-    plt.savefig(f"{save_path}num_atoms.png")
     plt.figure()
     plt.plot(accuracies)
     plt.title("Accuracy")
