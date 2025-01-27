@@ -434,3 +434,30 @@ def run_spectral_clustering(graph, n_clusters):
     )
     labels = spectral.fit_predict(adjacency_matrix)
     return labels
+
+
+def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
+    atoms = Atoms()
+    coefs = Coefs()
+    n = graph.num_nodes
+    for i in range(graph.num_clusters):
+        atom = GraphAtom()
+        atom.initialize(graph.num_nodes, graph.num_features, graph.num_clusters)
+        mask = cluster_labels == i
+        coef = np.sum(mask)
+        atom.e = np.zeros(n)
+        atom.e[mask] = 1
+        atom.e /= np.linalg.norm(atom.e)
+        Rv = graph.cov
+        atom.R = np.einsum("ijk,i->jk", Rv, atom.e**2)
+        atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
+
+        b = np.zeros((n, graph.num_clusters))
+        node_ids = np.arange(n)
+        b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
+        a = np.einsum("i, ij-> j", atom.e**2, b)
+        atom.b = np.zeros(graph.num_classes, dtype=float)
+        atom.b[np.argmax(a)] = 1
+        atoms.add_atom(atom)
+        coefs.add_coef(coef)
+    return atoms, coefs

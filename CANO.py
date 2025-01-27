@@ -8,12 +8,13 @@ from utils.algorithm_utils_orig import *
 from utils.utils import *
 
 
-def CANO(graph, log_results=True):
+def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     n = graph.num_nodes
     num_features = graph.num_features
     c = graph.num_clusters
     ## Initialization
-    atoms, coefs = create_random_atoms(n, num_features, c, c)
+    if atoms is None:
+        atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
     # coefs = coefs_opt
@@ -24,15 +25,17 @@ def CANO(graph, log_results=True):
     # sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
     f_opt = f(opt_sig)
-
-    if config.ADMM == "L":
-        admm = ADMM_cls(sig.L, project_to_bound)
+    if admm is None:
+        if config.ADMM == "L":
+            admm = ADMM_cls(sig.L, project_to_bound)
+            f.set_ADMM_params(admm)
+        elif config.ADMM == "pi":
+            admm = ADMM_cls(sig.pi, project_to_simplex)
+            f.set_ADMM_params(admm)
+        else:  # config.ADMM == "None"
+            admm = None
+    else:
         f.set_ADMM_params(admm)
-    elif config.ADMM == "pi":
-        admm = ADMM_cls(sig.pi, project_to_simplex)
-        f.set_ADMM_params(admm)
-    else:  # config.ADMM == "None"
-        admm = None
 
     f_sig = f(sig)
 
@@ -90,7 +93,7 @@ def CANO(graph, log_results=True):
             Lambda_terms.append(lambda_term)
             Lambda_norms.append(lambda_norm)
 
-        f_sig = f(sig)
+        f_sig = f(sig, ADMM=False)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -106,6 +109,7 @@ def CANO(graph, log_results=True):
             "diff": diff,
             "lambda term": lambda_term,
             "lambda norm": f"{lambda_norm:,.4f}",
+            "beta": config.beta,
         }
 
         if log_results:

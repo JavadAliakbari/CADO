@@ -13,7 +13,7 @@ from Graph_Atom import ADMM
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
-seed = 45
+seed = 4
 random.seed(seed)
 np.random.seed(seed)
 
@@ -420,6 +420,8 @@ def plot_results(
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
     plt.plot(f_values)
+    plt.title("Loss")
+    plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")

@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+from Graph_Atom.ADMM import ADMM_cls
 from utils.SBM import SBM
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
@@ -74,20 +75,23 @@ if __name__ == "__main__":
     coefs = Coefs()
     sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
+
+    if config.ADMM == "L":
+        admm = ADMM_cls(sig.L, project_to_bound)
+        f.set_ADMM_params(admm)
+    elif config.ADMM == "pi":
+        admm = ADMM_cls(sig.pi, project_to_simplex)
+        f.set_ADMM_params(admm)
+    else:  # config.ADMM == "None"
+        admm = None
     f_sig = f(sig, ADMM=True)
-
-    if config.ADMM:
-        Lambda = np.zeros((n, n))
-        Lp = sig.L
-        Lp = project_to_bound(Lp)
-
-        f.set_ADMM_params(Lambda, Lp)
 
     bar = tqdm(total=config.cogent_iters)
     f_values = []
     accuracies = []
     diff_vals = []
     Lambda_terms = []
+    Lambda_norms = []
     num_atoms = []
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
@@ -109,22 +113,14 @@ if __name__ == "__main__":
             #     atoms, coefs = Matrix_Truncate(atoms, f, coefs, F_th)
             sig = atoms.calc_sig(coefs)
 
-        if config.ADMM:
-            # min Lp
-            # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
-            Lp = f.Lp
-            Lambda = f.Lambda
-            Lp = Lambda / config.beta + sig.L
-            Lp = project_to_bound(Lp)
-
-            # max Lambda
-            d = sig.L - Lp
-            Lambda += config.beta * d
-            diff = matrix_dot_product(d, d)
-
-            lambda_term = matrix_dot_product(Lambda, d)
-
-            f.set_ADMM_params(Lambda, Lp)
+        if admm is not None:
+            if config.ADMM == "L":
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L)
+            elif config.ADMM == "pi":
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi)
+            diff_vals.append(diff)
+            Lambda_terms.append(lambda_term)
+            Lambda_norms.append(lambda_norm)
         f_sig = f(sig, ADMM=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
@@ -155,5 +151,14 @@ if __name__ == "__main__":
             Lambda_terms.append(lambda_term)
 
     log_results(atoms, coefs, graph, results, save_path)
-    plot_results(f_values, num_atoms, accuracies, save_path)
-    save_model_params(atoms, coefs, graph, Lambda, Lp, save_path)
+    plot_results(
+        f_values,
+        num_atoms,
+        accuracies,
+        Lambda_norms,
+        atoms,
+        admm.Lambda,
+        save_path,
+        # f_opt,
+    )
+    save_model_params(atoms, coefs, graph, admm, save_path)

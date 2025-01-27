@@ -61,14 +61,14 @@ class GraphAtom(Atom):
         sig = GraphSig(e_term, R_term, b_term, add_eps=True)
         return sig
 
-    def update_e(self, e):
-        self.e = e
+    # def update_e(self, e):
+    #     self.e = e
 
-    def update_R(self, R):
-        self.R = R
+    # def update_R(self, R):
+    #     self.R = R
 
-    def update_b(self, b):
-        self.b = b
+    # def update_b(self, b):
+    #     self.b = b
 
     def calc_grad(self, grad_sig: GraphSig):
         if grad_sig is None:
@@ -142,7 +142,7 @@ class GraphAtom(Atom):
             λ = self.update_e(grad, it, itr)
 
             if config.mu1 != 0:
-                self.update_R(grad, itr, it)
+                self.update_R(grad, it, itr)
 
             if config.mu2 != 0:
                 self.update_b(grad)
