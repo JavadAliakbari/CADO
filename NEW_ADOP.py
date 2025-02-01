@@ -41,7 +41,7 @@ def ADOP(graph):
     results = []
     accuracies = []
 
-    bar = tqdm(total=config.total_iterations, leave=False)
+    bar = tqdm(total=config.total_iterations, leave=True)
     for outer_iter in range(config.total_iterations):
 
         for itr in range(config.local_iter_ALM):

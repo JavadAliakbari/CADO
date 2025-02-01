@@ -265,22 +265,18 @@ def calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
     tmp3 = np.zeros(config.num_nodes)
     tmp4 = np.zeros(config.num_nodes)
 
-    temp = (graph.X) @ invert_matrix(atom_R) @ np.transpose(graph.X)
+    # temp = (graph.X) @ invert_matrix(atom_R) @ np.transpose(graph.X)
 
-    grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
-    grad_Ri = np.einsum("n,ij->nij", 2 * coef * atom_e, atom_R)
-    tmp2 = np.einsum("nij,nij->n", grad_Ri, grad_Rv)
-    atom_trace_R = np.trace(atom_R)
-    for i in range(config.num_nodes):
-        # if atom_e[i] == 0:
-        #     tmp2[i] = 0
-        # else:
-        #     tmp2[i] = (-2 / coef) * (atom_e[i] ** (-3)) * temp[i, i]
-        tmp3[i] = 2 * coef * atom_e[i] * atom_trace_R
-        tmp4[i] = 2 * coef * atom_e[i] * atom_b[graph.y[i]]
+    if config.mu1 != 0:
+        grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
+        grad_Ri = np.einsum("n,ij->nij", 2 * coef * atom_e, atom_R)
+        tmp2 = np.einsum("nij,nij->n", grad_Ri, grad_Rv)
+        atom_trace_R = np.trace(atom_R)
+        tmp3 = 2 * coef * atom_e * atom_trace_R
+    tmp4 = 2 * coef * atom_e[graph.train_mask] * atom_b[graph.y[graph.train_mask]]
 
     grad_ei = (
-        - config.mu1 * tmp2 / config.dimension
+        -config.mu1 * tmp2 / config.dimension
         + config.mu1 * tmp3 / config.dimension
         - config.mu2 * tmp4 / config.num_clusters
     )
@@ -289,8 +285,8 @@ def calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
 
 def calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
     # atom_e[np.where(atom_e == 0)] = 1e-4
-    tmp_1 = np.einsum("ijk,i->jk", graph.cov_ADOP, atom_e ** (-2))
-    R_inv = invert_matrix(atom_R)
+    # tmp_1 = np.einsum("ijk,i->jk", graph.cov_ADOP, atom_e ** (-2))
+    # R_inv = invert_matrix(atom_R)
 
     grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
     tmp_2 = np.einsum("n,nil->il", (coef * atom_e**2), grad_Rv)
@@ -302,7 +298,6 @@ def calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
 
 
 def calc_grad_bi_ADOP(graph, atom_e, atom_R, atom_b, coef):
-
     tmp = np.zeros((config.num_nodes, config.num_clusters), dtype=float)
     train_labels = graph.y[graph.train_mask]
     train_nodes = np.arange(config.num_nodes)[graph.train_mask]
@@ -315,11 +310,14 @@ def calc_grad_bi_ADOP(graph, atom_e, atom_R, atom_b, coef):
 def claulate_grad_coefs_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv):
     grad_coefs = []
     for atom_e, atom_R, atom_b, coef in zip(atoms_e, atoms_R, atoms_b, coefs):
-        grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
-        grad_c = np.einsum("n,il->nil", atom_e**2, atom_R)
-        tmp1 = np.einsum("nij,nij->", grad_c, grad_Rv)
-        tmp2 = np.sum(atom_e**2) * np.trace(atom_R)
-        grad1 = config.mu1 * (-tmp1 + tmp2)
+        if config.mu1 != 0:
+            grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
+            grad_c = np.einsum("n,il->nil", atom_e**2, atom_R)
+            tmp1 = np.einsum("nij,nij->", grad_c, grad_Rv)
+            tmp2 = np.sum(atom_e**2) * np.trace(atom_R)
+            grad1 = config.mu1 * (-tmp1 + tmp2)
+        else:
+            grad1 = 0
 
         # grad2 = config.mu2 * np.sum(2 * coef * atom_e * atom_b[graph.y])
         tmp = np.zeros((config.num_nodes, config.num_clusters), dtype=float)
@@ -343,7 +341,10 @@ def claulate_grad_coefs_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv):
 
 def calc_grad_atom_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
     grad_ei = calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
-    grad_Ri = calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
+    if config.mu1 != 0:
+        grad_Ri = calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
+    else:
+        grad_Ri = 0
     grad_bi = calc_grad_bi_ADOP(graph, atom_e, atom_R, atom_b, coef)
 
     return grad_ei, grad_Ri, grad_bi
@@ -397,8 +398,11 @@ def update_atom_ADOP(grad_ei, grad_Ri, grad_bi, atom_e, atom_R, atom_b, lr):
 
 
 def update_atoms_and_L_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, sig_L):
-    _, sig_Rv_s_tmp, _ = calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs)
-    Rv_s_inv = np.array([invert_matrix(matrix) for matrix in sig_Rv_s_tmp])
+    if config.mu1 != 0:
+        _, sig_Rv_s_tmp, _ = calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs)
+        Rv_s_inv = np.array([invert_matrix(matrix) for matrix in sig_Rv_s_tmp])
+    else:
+        Rv_s_inv = None
 
     grad_coefs = claulate_grad_coefs_ADOP(
         graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv
