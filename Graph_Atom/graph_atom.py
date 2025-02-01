@@ -1,8 +1,7 @@
 import numpy as np
 import scipy as sc
-from Atom.atom import Atom
 
-# from Atom.coefs import Coefs
+from Atom.atom import Atom
 from Graph_Atom.graph_sig import GraphSig
 from utils.utils import *
 
@@ -39,8 +38,8 @@ class GraphAtom(Atom):
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
-        self.R = np.zeros((self.d, self.d))
-        self.b = np.zeros(self.c)
+        # self.R = np.zeros((self.d, self.d))
+        # self.b = np.zeros(self.c)
 
     def e_term(self):
         return np.outer(self.e, self.e)
@@ -70,16 +69,76 @@ class GraphAtom(Atom):
     # def update_b(self, b):
     #     self.b = b
 
+    # def update_atoms_ADOP_GDstep(atoms, grad_atoms, lr):
+    #     new_atoms = deepcopy(atoms)
+    #     for i, atom in enumerate(atoms):
+    #         atom -= lr * grad_atoms[i]
+    #         new_atoms.add_atom(atom)
+    #     return new_atoms
+
     def calc_grad(self, grad_sig: GraphSig):
         if grad_sig is None:
             return 0
-        grad_ei = self.calc_grad_ei(grad_sig) / grad_sig.n
-        grad_Ri = self.calc_grad_Ri(grad_sig) / grad_sig.d
-        grad_bi = self.calc_grad_bi(grad_sig) / grad_sig.c
+        grad_ei = self.calc_grad_ei(grad_sig)
+        grad_Ri = self.calc_grad_Ri(grad_sig)
+        grad_bi = self.calc_grad_bi(grad_sig)
 
         grad = GraphAtom()
         grad.set_params(grad_ei, grad_Ri, grad_bi)
         return grad
+
+    def update_atom_ADOP(self, grad_sig: GraphSig, lr, coef, graph):
+        grad_atom = self.calc_grad_ADOP(grad_sig, coef, graph)
+        self.update(grad_atom, lr)
+
+    def calc_grad_ADOP(self, grad_sig: GraphSig, coef, graph):
+        if grad_sig is None:
+            return 0
+        grad_ei = self.calc_grad_ei_ADOP(grad_sig, coef, graph)
+        grad_Ri = self.calc_grad_Ri_ADOP(grad_sig, coef, graph)
+        grad_bi = self.calc_grad_bi_ADOP(grad_sig, coef, graph)
+
+        grad = GraphAtom()
+        grad.set_params(grad_ei, grad_Ri, grad_bi)
+        return grad
+
+    def calc_grad_ei_ADOP(self, grad_sig: GraphSig, coef, graph):
+        # scale_factor = (config.rho_max / config.rho_min) ** 2
+        # tmp1 = 2 * coef * grad_sig.L @ self.e
+        tmp2 = np.zeros(self.n)
+        tmp3 = np.zeros(self.n)
+        tmp4 = np.zeros(self.n)
+
+
+        temp = (graph.X) @ np.linalg.inv(self.R) @ np.transpose(graph.X)
+
+
+        atom_trace_R = np.trace(self.R)
+        for i in range(self.n):
+            tmp2[i] = (-2 / coef) * (self.e[i] ** (-3)) * temp[i, i]
+            tmp3[i] = 2 * coef * self.e[i] * atom_trace_R
+            tmp4[i] = 2 * coef * self.e[i] * self.b[graph.y[i]]
+
+        # grad_ei = tmp1 + tmp2 + tmp3 + tmp4
+        grad_ei = config.mu1 * tmp2 + config.mu1 * tmp3 - config.mu2 * tmp4
+        return grad_ei
+
+    def calc_grad_Ri_ADOP(self, grad_sig: GraphSig, coef, graph):
+        tmp1 = np.einsum("ijk,i->jk", graph.cov_ADOP, self.e ** (-2))
+
+        try:
+            R_inv = np.linalg.inv(self.R)   
+        except:
+            R_inv = np.linalg.inv(self.R + 1e-4 * np.eye(self.d))
+
+        tmp2 = np.einsum("jk,km,mn->jn", R_inv, tmp1, R_inv)
+        tmp3 = np.identity(self.d) * np.sum(self.e**2)
+        grad_Ri = coef * tmp3 - (1 / coef) * tmp2
+        return config.mu1 * grad_Ri
+
+    def calc_grad_bi_ADOP(self, grad_sig: GraphSig, coef, graph):
+        grad_bi = np.einsum("i, ij-> j", self.e**2, grad_sig.pi)
+        return -config.mu2 * grad_bi
 
     def calc_grad_ei(self, grad_sig: GraphSig):
         scale_factor = (config.rho_max / config.rho_min) ** 2

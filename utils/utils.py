@@ -10,13 +10,16 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
-from Graph_Atom import ADMM
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
-# seed = 4
-# random.seed(seed)
-# np.random.seed(seed)
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
+
+###############################################################
+###############################################################
+###############################################################
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -44,26 +47,51 @@ colors = [
 custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
 
 
+###############################################################
+###############################################################
+###############################################################
+
+
+def create_random_normalized_vector(n):
+    vector = np.random.randn(n)
+    normalized_vector = vector / np.linalg.norm(vector)
+    return normalized_vector
+
+
+def create_list_of_vectors_to_separate_space_of_signals(
+    num_clusters, dimension, rho_min, rho_plus, signal_subspace_dim
+):
+    vectors = []
+    for i in range(num_clusters):
+        vector = np.ones(dimension) * rho_min
+        vector[i * signal_subspace_dim : (i + 1) * signal_subspace_dim] = rho_plus
+        vectors.append(vector)
+    return vectors
+
+
+def get_random_coef_between_1_and_(n):
+    return np.random.uniform(1, n)
+
+
 def matrix_dot_product(A, B):
-    """
-    Compute the dot product of two tensors A and B.
-
-    Parameters:
-    A (numpy.ndarray): First input tensor.
-    B (numpy.ndarray): Second input tensor.
-
-    Returns:
-    float: The dot product of tensors A and B.
-    """
     return np.sum(A * B)
 
 
-# Function to invert a matrix
 def invert_matrix(matrix):
-    try:
-        return np.linalg.inv(matrix)
-    except np.linalg.LinAlgError:
-        return np.eye(matrix.shape[0])
+    # try:
+    return np.linalg.inv(matrix)
+    # except np.linalg.LinAlgError:
+    # return np.eye(matrix.shape[0])
+    # return np.linalg.inv(matrix + 1e-6 * np.eye(matrix.shape[0]))
+
+
+def compute_inner_products(tensor):
+    n, d, _ = tensor.shape
+    result = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            result[i, j] = np.inner(tensor[i].flatten(), tensor[j].flatten())
+    return result
 
 
 def calc_accuracy(pred_y, y):
@@ -71,21 +99,413 @@ def calc_accuracy(pred_y, y):
     return sum(pred_y == y) / len(y)
 
 
+###############################################################
+###############################################################
+###############################################################
+
+
+def initialize_atoms(
+    graph,
+    init="rand",
+    init_atoms_e=None,
+    init_atoms_R=None,
+    init_atoms_b=None,
+    init_coefs=None,
+):
+
+    atoms_e_opt = []
+    atoms_R_opt = []
+    atoms_b_opt = []
+    coeffss_opt = []
+
+    for i in range(config.num_clusters):
+        atoms_e_opt.append(graph.E[:, i])
+        atoms_R_opt.append(graph.Ri_matrices[i])
+        atoms_b_opt.append(graph.b[i])
+        coeffss_opt.append(graph.λ[i])
+
+    if init == "rand":
+        atoms_e = []
+        atoms_R = []
+        atoms_b = []
+        coeffss = []
+        for i in range(config.num_clusters):
+            atoms_e.append(create_random_normalized_vector(config.num_nodes))
+            atoms_R.append(
+                create_Ri_symmetric_matrix_with_constrained_eigenvalues(
+                    config.dimension, config.rho_min, config.rho_max, noise_level=0.0
+                )
+            )
+            atoms_b.append(
+                create_multiple_noisy_probability_vectors(
+                    1, config.num_clusters, noise_level=1
+                )[0]
+            )
+            coeffss.append(get_random_coef_between_1_and_(config.num_nodes))
+
+    elif init == "opt":
+        atoms_e = atoms_e_opt
+        atoms_R = atoms_R_opt
+        atoms_b = atoms_b_opt
+        coeffss = coeffss_opt
+
+    elif init == "zeros":
+        atoms_e = []
+        atoms_R = []
+        atoms_b = []
+        coeffss = []
+        for i in range(config.num_clusters):
+            atoms_e.append(np.zeros(config.num_nodes))
+            atoms_R.append(np.zeros((config.dimension, config.dimension)))
+            atoms_b.append(np.zeros(config.num_clusters))
+            coeffss.append(0)
+
+    elif init == "load":
+        atoms_e = init_atoms_e
+        atoms_R = init_atoms_R
+        atoms_b = init_atoms_b
+        coeffss = init_coefs
+
+    sig_L, _, _ = calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coeffss)
+
+    return (
+        atoms_e,
+        atoms_R,
+        atoms_b,
+        coeffss,
+        atoms_e_opt,
+        atoms_R_opt,
+        atoms_b_opt,
+        coeffss_opt,
+        sig_L,
+    )
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
+def calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs):
+    sig_L = np.zeros((config.num_nodes, config.num_nodes))
+    sig_Rv_s = np.zeros((config.num_nodes, config.dimension, config.dimension))
+    sig_Piv_s = np.zeros((config.num_nodes, config.num_clusters))
+
+    for e, R, b, coef in zip(atoms_e, atoms_R, atoms_b, coefs):
+        sig_L += coef * np.outer(e, e)
+        sig_Rv_s += coef * np.einsum("i,jk->ijk", (e**2), R)
+        sig_Piv_s += coef * np.einsum("i,j->ij", (e**2), b)
+
+    return sig_L, sig_Rv_s, sig_Piv_s
+
+
+def compute_term_0(graph, sig_L):
+    if config.Abar:
+        term_0 = -matrix_dot_product(graph.Abar, sig_L) / config.num_nodes
+    else:
+        r = graph.A - sig_L
+        term_0 = 0.5 * matrix_dot_product(r, r) / config.num_nodes
+    return term_0
+
+
+def compute_term_1(graph, sig_Rv_s):
+    if config.mu1 != 0:
+        sig_Rv_inv = np.array([invert_matrix(matrix) for matrix in sig_Rv_s])
+        term_1 = np.einsum("ijk,ijk->", graph.cov_ADOP, sig_Rv_inv) / config.dimension
+        term_11 = np.trace(np.sum(sig_Rv_s, axis=0)) / config.dimension
+    else:
+        term_1 = 0
+        term_11 = 0
+    return term_1 + term_11
+
+
+def compute_term_2(graph, sig_Piv_s):
+    if config.mu2 != 0:
+        train_labels = graph.y[graph.train_mask]
+        train_nodes = np.arange(graph.num_nodes)[graph.train_mask]
+        term_2 = np.sum(sig_Piv_s[train_nodes, train_labels]) / config.num_clusters
+    else:
+        term_2 = 0
+    return term_2
+
+
+def compute_term_3(coefs):
+    return np.sum(coefs) / config.num_clusters
+
+
+def compute_objective_value(
+    graph, atoms_e, atoms_R, atoms_b, coefs, defined_sig_L=None
+):
+    sig_L, sig_Rv_s, sig_Piv_s = calculate_sig_from_atoms(
+        atoms_e, atoms_R, atoms_b, coefs
+    )
+
+    if defined_sig_L is not None:
+        sig_L = defined_sig_L
+
+    term_0 = compute_term_0(graph, sig_L)
+    term_1 = compute_term_1(graph, sig_Rv_s)
+    term_2 = compute_term_2(graph, sig_Piv_s)
+    term_3 = compute_term_3(coefs)
+
+    objective = term_0 + config.mu1 * term_1 - config.mu2 * term_2 + config.mu0 * term_3
+
+    return objective
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
+def calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
+    # scale_factor = (config.rho_max / config.rho_min) ** 2
+    # tmp1 = 2 * coef * grad_sig_L @ atom_e
+    tmp2 = np.zeros(config.num_nodes)
+    tmp3 = np.zeros(config.num_nodes)
+    tmp4 = np.zeros(config.num_nodes)
+
+    temp = (graph.X) @ invert_matrix(atom_R) @ np.transpose(graph.X)
+
+    grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
+    grad_Ri = np.einsum("n,ij->nij", 2 * coef * atom_e, atom_R)
+    tmp2 = np.einsum("nij,nij->n", grad_Ri, grad_Rv)
+    atom_trace_R = np.trace(atom_R)
+    for i in range(config.num_nodes):
+        # if atom_e[i] == 0:
+        #     tmp2[i] = 0
+        # else:
+        #     tmp2[i] = (-2 / coef) * (atom_e[i] ** (-3)) * temp[i, i]
+        tmp3[i] = 2 * coef * atom_e[i] * atom_trace_R
+        tmp4[i] = 2 * coef * atom_e[i] * atom_b[graph.y[i]]
+
+    grad_ei = (
+        - config.mu1 * tmp2 / config.dimension
+        + config.mu1 * tmp3 / config.dimension
+        - config.mu2 * tmp4 / config.num_clusters
+    )
+    return grad_ei
+
+
+def calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
+    # atom_e[np.where(atom_e == 0)] = 1e-4
+    tmp_1 = np.einsum("ijk,i->jk", graph.cov_ADOP, atom_e ** (-2))
+    R_inv = invert_matrix(atom_R)
+
+    grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
+    tmp_2 = np.einsum("n,nil->il", (coef * atom_e**2), grad_Rv)
+    # tmp_2 = np.einsum("jk,km,mn->jn", R_inv, tmp_1, R_inv)
+    tmp_3 = coef * np.identity(config.dimension) * np.sum(atom_e**2)
+
+    grad_Ri = tmp_3 - tmp_2
+    return config.mu1 * grad_Ri / config.dimension
+
+
+def calc_grad_bi_ADOP(graph, atom_e, atom_R, atom_b, coef):
+
+    tmp = np.zeros((config.num_nodes, config.num_clusters), dtype=float)
+    train_labels = graph.y[graph.train_mask]
+    train_nodes = np.arange(config.num_nodes)[graph.train_mask]
+    tmp[train_nodes, train_labels] = 1.0
+
+    grad_bi = np.einsum("i, ij-> j", atom_e**2, tmp)
+    return -config.mu2 * coef * grad_bi / config.num_clusters
+
+
+def claulate_grad_coefs_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv):
+    grad_coefs = []
+    for atom_e, atom_R, atom_b, coef in zip(atoms_e, atoms_R, atoms_b, coefs):
+        grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
+        grad_c = np.einsum("n,il->nil", atom_e**2, atom_R)
+        tmp1 = np.einsum("nij,nij->", grad_c, grad_Rv)
+        tmp2 = np.sum(atom_e**2) * np.trace(atom_R)
+        grad1 = config.mu1 * (-tmp1 + tmp2)
+
+        # grad2 = config.mu2 * np.sum(2 * coef * atom_e * atom_b[graph.y])
+        tmp = np.zeros((config.num_nodes, config.num_clusters), dtype=float)
+        train_labels = graph.y[graph.train_mask]
+        train_nodes = np.arange(config.num_nodes)[graph.train_mask]
+        tmp[train_nodes, train_labels] = atom_b[graph.y[graph.train_mask]]
+
+        tmp3 = np.einsum("i, ij-> j", atom_e**2, tmp)
+        grad2 = -config.mu2 * np.sum(tmp3)
+
+        grad3 = config.mu0
+
+        grad = (
+            grad1 / config.dimension
+            + grad2 / config.num_clusters
+            + grad3 / config.num_clusters
+        )
+        grad_coefs.append(grad)
+    return np.array(grad_coefs)
+
+
+def calc_grad_atom_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
+    grad_ei = calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
+    grad_Ri = calc_grad_Ri_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
+    grad_bi = calc_grad_bi_ADOP(graph, atom_e, atom_R, atom_b, coef)
+
+    return grad_ei, grad_Ri, grad_bi
+
+
+def project_to_bound_ADOP(atom_e, atom_R, atom_b):
+    proj_atom_e = project_to_unit_vector(atom_e)
+    proj_atom_R = project_to_psd_cone_with_constrained_eigenvals(
+        atom_R, config.rho_min, config.rho_max
+    )
+    proj_atom_b = project_to_simplex(atom_b, 1)
+    return proj_atom_e, proj_atom_R, proj_atom_b
+
+
+def project_to_unit_vector(vector):
+    return vector / np.linalg.norm(vector)
+
+
+def project_to_psd_cone_with_constrained_eigenvals(matrix, rho_minus, rho_plus):
+    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+    clipped_eigenvalues = np.clip(eigenvalues, rho_minus, rho_plus)
+    projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T
+    return projected_matrix
+
+
+def project_to_simplex(y, a):
+    if y.ndim == 1:
+        return _project_vector_to_simplex(y, a)
+    elif y.ndim == 2:
+        return np.apply_along_axis(_project_vector_to_simplex, 1, y, a)
+    else:
+        raise ValueError("Input array must be 1D or 2D")
+
+
+def _project_vector_to_simplex(y, a):
+    u = np.sort(y)[::-1]
+    cssv = np.cumsum(u) - a
+    rho = np.nonzero(u * np.arange(1, len(y) + 1) > cssv)[0][-1]
+    theta = cssv[rho] / (rho + 1)
+    return np.maximum(y - theta, 0)
+
+
+def update_atom_ADOP(grad_ei, grad_Ri, grad_bi, atom_e, atom_R, atom_b, lr):
+    new_atom_e = atom_e - lr * grad_ei
+    new_atom_R = atom_R - lr * grad_Ri
+    new_atom_b = atom_b - lr * grad_bi
+    proj_atom_e, proj_atom_R, proj_atom_b = project_to_bound_ADOP(
+        new_atom_e, new_atom_R, new_atom_b
+    )
+    return proj_atom_e, proj_atom_R, proj_atom_b
+
+
+def update_atoms_and_L_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, sig_L):
+    _, sig_Rv_s_tmp, _ = calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs)
+    Rv_s_inv = np.array([invert_matrix(matrix) for matrix in sig_Rv_s_tmp])
+
+    grad_coefs = claulate_grad_coefs_ADOP(
+        graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv
+    )
+    grads = []
+    for idx, (atom_e, atom_R, atom_b, coef) in enumerate(
+        zip(atoms_e, atoms_R, atoms_b, coefs)
+    ):
+        out = calc_grad_atom_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
+        grads.append(out)
+
+    for idx, (grad_ei, grad_Ri, grad_bi) in enumerate(grads):
+        coefs[idx] = update_coef_ADOP(coefs[idx], grad_coefs[idx], config.lr)
+        atoms_e[idx], atoms_R[idx], atoms_b[idx] = update_atom_ADOP(
+            grad_ei, grad_Ri, grad_bi, atom_e, atom_R, atom_b, config.lr
+        )
+
+    sig_L -= config.lr * calculate_grad_sig_L(graph, sig_L)
+
+    return atoms_e, atoms_R, atoms_b, coefs, sig_L
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
+def update_coef_ADOP(coef, grad_coef, lr):
+    new_coef = coef - lr * grad_coef
+    return new_coef
+
+
+def calculate_grad_sig_L(graph, sig_L):
+    if config.Abar:
+        grad = -graph.Abar
+    else:
+        grad = graph.A - sig_L
+    return grad
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
+def project_to_Atomic_Decomposition(atoms_e, sig_L, coefs):
+    A = np.array(
+        [np.outer(atom_e, atom_e) for atom_e in atoms_e]
+    )  # shape = (num_atoms, n, n)
+    B = compute_inner_products(A)  # shape = (num_atoms, num_atoms)
+    y_tmp = np.einsum("kij,k->ij", A, coefs) - sig_L  # shape = (n, n)
+    y_bar = np.array(
+        [np.einsum("ij,ij->", A[i], y_tmp) for i in range(config.num_clusters)]
+    )  # shape = (num_atoms)
+    tmp = invert_matrix(B + np.eye(config.num_clusters))
+    alpha = np.matmul(tmp, y_bar)  # shape = (num_atoms)
+    lagrange_z = y_tmp - np.einsum("kij,k->ij", A, alpha)
+
+    sig_L += lagrange_z
+    coefs -= np.einsum("ijk,jk->i", A, lagrange_z)
+
+    return sig_L, coefs
+
+
+def project_to_positive_coefs(coefs):
+    return np.maximum(coefs, 0)
+
+
+def project_to_bound(a, a_min=0, a_max=1):
+    return np.clip(a, a_min, a_max)
+
+
+def project_sig_L_and_coefs_ADOP(atoms_e, sig_L, coefs):
+    sig_L, coefs = project_to_Atomic_Decomposition(atoms_e, sig_L, coefs)
+    coefs = project_to_positive_coefs(coefs)
+    sig_L = project_to_bound(sig_L)
+    return sig_L, coefs
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
+def calc_accuracy_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs):
+    sig_L, sig_Rv_s, sig_piv_s = calculate_sig_from_atoms(
+        atoms_e, atoms_R, atoms_b, coefs
+    )
+    y_pred = np.argmax(sig_piv_s, axis=1)
+    y_pred_test = y_pred[graph.test_mask]
+
+    if y_pred_test.shape[0] > 0:
+        acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+    else:
+        acc = 1
+
+    return acc
+
+
+###############################################################
+###############################################################
+###############################################################
+
+
 def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     dimension, rho_minus, rho_plus, noise_level=0.0
 ):
-    """
-    Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
-
-    Parameters:
-    dimension (int): Size of the matrix (n x n).
-    rho_minus (float): Lower bound of the eigenvalues.
-    rho_plus  (float): Upper bound of the eigenvalues.
-    noise_level (float): The scale of the noise to be added (small value to slightly perturb).
-
-    Returns:
-    np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
-    """
     # Generate dimension eigenvalues uniformly distributed between rho_minus and rho_plus
     all_eigenvalues = np.random.uniform(rho_minus, rho_plus, dimension)
 
@@ -103,36 +523,19 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     return symmetric_matrix
 
 
-def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
-    dimension, rho_minus, rho_plus, num_signal_features
+def create_Ri_symmetric_matrix_with_constrained_eigenvalues2_ADOP(
+    dimension,
+    rho_minus,
+    rho_plus,
+    num_signal_features,
+    all_eigenvalues,
+    dimension_permutation,
 ):
-    """
-    Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
 
-    Parameters:
-    dimension (int): Size of the matrix (n x n).
-    rho_minus (float): Lower bound of the eigenvalues.
-    rho_plus  (float): Upper bound of the eigenvalues.
-    noise_level (float): The scale of the noise to be added (small value to slightly perturb).
-    include_extremes (bool): If True, include rho_minus and rho_plus as exact eigenvalues.
-
-    Returns:
-    np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
-    """
-    # signal_eigenvalues = np.random.uniform(rho_plus, 2 * rho_plus, 2)
-    signal_eigenvalues = np.array(num_signal_features * [rho_plus])
-    noise_eigenvalues = np.array([rho_minus] * (dimension - num_signal_features))
-    # noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
-    all_eigenvalues = np.concatenate((signal_eigenvalues, noise_eigenvalues))
-
-    # Create rho_minus random orthogonal matrix Q using QR decomposition
-    # Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
-    idx = np.random.permutation(dimension)
     Q = np.zeros((dimension, dimension), dtype=float)
-    Q[np.arange(dimension), idx] = 1
+    Q[np.arange(dimension), dimension_permutation] = 1
 
-    # Construct the symmetric matrix using A = Q * Lambda * Q.T
-    Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
+    Lambda = np.diag(all_eigenvalues)
     symmetric_matrix = Q @ Lambda @ Q.T
 
     return symmetric_matrix
@@ -141,19 +544,6 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
 def create_multiple_noisy_probability_vectors(
     count, dimension, noise_level=0.0, manual_probabilities=None
 ):
-    """
-    Create multiple noisy probability vectors where each starts with a unique index set to 1.
-
-    Parameters:
-    count (int): Number of probability vectors to generate.(In our problem: the number of clusters)
-    dimension (int): Length of each probability vector.(In our probelm: the number of classes)
-    noise_level (float): The scale of the noise to add.
-    manual_probabilities (list of lists or None): If provided, use this as the probability vectors.
-
-    Returns:
-    np.ndarray: An array containing the noisy probability vectors.
-    """
-
     # If manual probabilities are provided, return them as a numpy array
     if manual_probabilities is not None:
         # Check that manual probabilities have the correct shape
@@ -195,136 +585,9 @@ def create_multiple_noisy_probability_vectors(
     return np.array(probability_vectors)
 
 
-def project_to_unit_vector(vector):
-    """
-    Project a vector onto the unit vector.
-
-    Parameters:
-    vector (np.ndarray): The input vector to be projected.
-
-    Returns:
-    np.ndarray: The projected unit vector.
-    """
-    return vector / np.linalg.norm(vector)
-
-
-def project_to_psd_cone(matrix, rho_minus, rho_plus):
-    """
-    Project a matrix onto the positive semidefinite cone.
-
-    Parameters:
-    matrix (np.ndarray): The input matrix to be projected.
-
-    Returns:
-    np.ndarray: The projected positive semidefinite matrix.
-    """
-    # Perform eigenvalue decomposition
-    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
-
-    # Clip the eigenvalues to ensure they are non-negative
-    clipped_eigenvalues = np.clip(eigenvalues, rho_minus, rho_plus)
-
-    # Reconstruct the matrix using the clipped eigenvalues
-    projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T
-
-    return projected_matrix
-
-
-def project_to_simplex(y, a=1):
-    return project_to_simplex2(y, a)
-    # return y
-    """
-    Efficiently project a vector y onto the simplex defined by sum(x) = a and x >= 0.
-
-    Parameters:
-    y (np.ndarray): The input vector to be projected.
-    a (float): The sum constraint for the simplex.
-
-    Returns:
-    np.ndarray: The projected vector.
-    """
-    if a < 0:
-        raise ValueError("The sum constraint 'a' must be non-negative.")
-
-    y[y < 0] = 0
-    y *= a * np.sum(y) ** -1
-    return y
-
-
-def project_inside_simplex2(λ0, E, a):
-    n, c = E.shape
-    ones = a * np.ones(n)  # RHS of inequality constraints
-
-    λ_var = cp.Variable(c)
-    # Define the objective function
-    objective = cp.Minimize(0.5 * cp.sum_squares(λ_var - λ0))
-
-    # Define constraints
-    constraints = [E @ λ_var <= ones]
-
-    # Solve the optimization problem
-    problem = cp.Problem(objective, constraints)
-    problem.solve()
-
-    return λ_var.value
-
-
-def project_inside_simplex(y, a):
-    if y.ndim == 1:
-        return _project_vector_inside_simplex(y, a)
-    elif y.ndim == 2:
-        return np.apply_along_axis(_project_vector_inside_simplex, 1, y, a)
-    else:
-        raise ValueError("Input array must be 1D or 2D")
-
-
-def project_to_simplex2(y, a):
-    if y.ndim == 1:
-        return _project_vector_to_simplex(y, a)
-    elif y.ndim == 2:
-        return np.apply_along_axis(_project_vector_to_simplex, 1, y, a)
-    else:
-        raise ValueError("Input array must be 1D or 2D")
-
-
-def _project_vector_to_simplex(y, a):
-    # Step 1: Sort y in descending order (largest to smallest)
-    u = np.sort(y)[::-1]
-
-    # Step 2: Find the rho value
-    # rho is the largest index where the condition u * (index + 1) > cssv holds
-    cssv = np.cumsum(u) - a
-    rho = np.nonzero(u * np.arange(1, len(y) + 1) > cssv)[0][-1]
-    # Step 3: Compute the theta value, which is used to shift the elements of y such that their sum equals 'a'
-    theta = cssv[rho] / (rho + 1)
-
-    # Step 4: Compute the projection to ensure the vector lies within the simplex defined by the sum constraint 'a'
-    return np.maximum(y - theta, 0)
-
-
-def _project_vector_inside_simplex(y, a):
-    if sum(y) <= a and np.all(y >= 0):
-        return y
-    # Step 1: Sort y in descending order (largest to smallest)
-    u = np.sort(y)[::-1]
-
-    # Step 2: Find the rho value
-    # rho is the largest index where the condition u * (index + 1) > cssv holds
-    cssv = np.cumsum(u) - a
-    rho = np.nonzero(u * np.arange(1, len(y) + 1) > cssv)[0][-1]
-    # Step 3: Compute the theta value, which is used to shift the elements of y such that their sum equals 'a'
-    theta = cssv[rho] / (rho + 1)
-
-    # Step 4: Compute the projection to ensure the vector lies within the simplex defined by the sum constraint 'a'
-    return np.maximum(y - theta, 0)
-
-
-def project_to_bound(a, a_min=0, a_max=1):
-    # a_mean = (a_max + a_min) / 2
-    # a[a > a_mean] = 1
-    # a[a < a_mean] = 0
-    # return a
-    return np.clip(a, a_min, a_max)
+###############################################################
+###############################################################
+###############################################################
 
 
 def one_hot_max(vector):
@@ -352,30 +615,13 @@ def plot_adj(A, name="L"):
     # Save the image with a specific DPI (dots per inch) to control the output size
     plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection="3d")
+    # plt.show(block=False)
+    # plt.close()
 
-    # x, y = np.meshgrid(range(A.shape[0]), range(A.shape[1]))
-    # # z = np.zeros_like(A)
 
-    # ax.plot_surface(
-    #     x,
-    #     y,
-    #     A,
-    #     # facecolors=plt.cm.viridis(A),
-    #     # rstride=1,
-    #     # cstride=1,
-    #     # antialiased=False,
-    #     # shade=False,
-    # )
-
-    # # ax.set_zlim(0, 1)
-    # # ax.set_xlabel("X axis")
-    # # ax.set_ylabel("Y axis")
-    # # ax.set_zlabel("Z axis")
-
-    # plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
-    # # plt.show()
+###############################################################
+###############################################################
+###############################################################
 
 
 def log_results(atoms, coefs, graph, results, save_path, terminal=True):
@@ -445,7 +691,29 @@ def plot_results(
     plot_adj(Lambda, name="Lambda")
 
 
-def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):
+def plot_results2(f_values, accuracies, atoms, save_path, f_opt=None):
+    os.makedirs(save_path, exist_ok=True)
+    plt.figure()
+    plt.plot(f_values)
+    plt.title("Loss")
+    plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
+    plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
+    # plt.yscale("log")
+    plt.savefig(f"{save_path}loss.png")
+    plt.figure()
+    plt.plot(accuracies)
+    plt.title("Accuracy")
+    plt.savefig(f"{save_path}accuracies.png")
+
+    plt.figure()
+    for id, atom in enumerate(atoms):
+        plt.plot(atom.e, "*-", label=f"atom {id}")
+    plt.legend()
+    plt.title("Eigenvectors")
+    plt.savefig(f"{save_path}eigenvectors.png")
+
+
+def save_model_params(atoms, coefs, graph, save_path):
     os.makedirs(save_path, exist_ok=True)
     filename = f"{save_path}atoms.pkl"
     with open(filename, "wb") as fid:
@@ -466,3 +734,17 @@ def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):
         filename = f"{save_path}Lp.pkl"
         with open(filename, "wb") as fid:
             pkl.dump(admm.Lp, fid)
+
+
+def save_model_params2(atoms, coefs, graph, save_path):
+    os.makedirs(save_path, exist_ok=True)
+    filename = f"{save_path}atoms.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(atoms, fid)
+
+    filename = f"{save_path}coefs.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(coefs, fid)
+    filename = f"{save_path}graph.pkl"
+    with open(filename, "wb") as fid:
+        pkl.dump(graph, fid)

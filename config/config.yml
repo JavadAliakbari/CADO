@@ -1,9 +1,11 @@
-mu1: 0.05
-mu2: 10
+mu0: 1.
+mu1: 1.
+mu2: 1.
 eta: 0.02
 beta: 100
+tau: 100
 local_iter: 1
-cogent_iters: 1000
+cogent_iters:  2500
 iter_or_cycles_to_find_next_atom: 30
 rho_min: 0.5                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
@@ -16,13 +18,27 @@ GP_tol: 0.000001
 line_search: False
 iner_iter_GA_R: 10000
 iner_step_GA_R: 0.01
-tau: 0
 alpha: 0.9
 eps: 0.0
 Enhance: False
 Abar: True
-ADMM: "L"
-train_ratio: 0.2
-lr: 0.01
-p: 0.1
-q: 0.05
+ADMM: False
+train_ratio: 1.
+lr: 0.1
+p: 1.
+q: 0.0
+
+
+samples_per_cluster: [4, 9, 16]
+num_nodes: 29
+num_clusters: 3
+dimension: 6
+signal_subspace_dim: 2
+initialize_atoms: "opt"   
+# initialize_atoms: "rand"   
+# initialize_atoms: "load"
+total_iterations: 50
+local_iter_ALP: 2
+local_iter_ALM: 1
+
+

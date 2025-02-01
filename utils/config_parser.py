@@ -4,6 +4,7 @@ import yaml
 class Config:
     def __init__(self, path="config/config.yml"):
         self.config = Config.load_config(path)
+        self.mu0 = self.config["mu0"]
         self.mu1 = self.config["mu1"]
         self.mu2 = self.config["mu2"]
         self.iner_iter_GA_R = self.config["iner_iter_GA_R"]
@@ -35,6 +36,15 @@ class Config:
         self.lr = self.config["lr"]
         self.p = self.config["p"]
         self.q = self.config["q"]
+        self.signal_subspace_dim = self.config["signal_subspace_dim"]
+        self.num_nodes = self.config["num_nodes"]
+        self.dimension = self.config["dimension"]
+        self.num_clusters = self.config["num_clusters"]
+        self.samples_per_cluster = self.config["samples_per_cluster"]
+        self.total_iterations = self.config["total_iterations"]
+        self.local_iter_ALP = self.config["local_iter_ALP"]
+        self.local_iter_ALM = self.config["local_iter_ALM"]
+        self.initialize_atoms = self.config["initialize_atoms"]
 
     def load_config(path):
         with open(path) as f:

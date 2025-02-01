@@ -1,5 +1,5 @@
-import numpy as np
 import networkx as nx
+import numpy as np
 
 from utils.graph import Graph
 from utils.utils import *
@@ -9,29 +9,32 @@ class SBM(Graph):
     def __init__(
         self,
         block_sizes,
-        probs,
+        p,
+        q,
         num_features,
         num_signal_features,
         train_ratio=1,
     ) -> None:
-        num_nodes = sum(block_sizes)
-        super().__init__(num_nodes, train_ratio)
+        super().__init__(config.num_nodes, train_ratio)
         self.block_sizes = block_sizes
+        probs = np.full((config.num_clusters, config.num_clusters), config.q)
+        np.fill_diagonal(probs, config.p)
         self.probs = probs
         self.num_features = num_features
         self.num_signal_features = num_signal_features
-        self.num_classes = len(block_sizes)
-        self.num_clusters = self.num_classes
+        self.num_classes = config.num_clusters
+        self.num_clusters = config.num_clusters
         self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
         self.L_opt, _, self.λ, self.E = self.create_partionioned_graph()
         self.b, self.pi, self.y = self.create_labels()
 
-        self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
+        self.Ri_matrices, self.Rv_matrices, self.X = self.create_features_ADOP()
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)
             - config.rho_min * np.eye(self.num_features)[None, :]
         )
+        self.cov_ADOP = np.einsum("ij,ik->ijk", self.X, self.X)
 
     def create_partionioned_graph(self):
         """
@@ -70,8 +73,8 @@ class SBM(Graph):
         return A, Abar, Lambda, E
 
     def create_adjacancy__matrix(self):
-        K = len(self.block_sizes)
-        n = sum(self.block_sizes)
+        K = config.num_clusters
+        n = config.num_nodes
 
         g = nx.stochastic_block_model(self.block_sizes, self.probs)
         A = nx.adjacency_matrix(g).toarray()
@@ -89,6 +92,48 @@ class SBM(Graph):
         E = eigenvectors[:, top_indices]
 
         return A, Abar, Lambda, E
+
+    def create_features_ADOP(self):
+        ## Generate symmetric matrices Ri
+        dimension_permutation = np.random.permutation(self.num_features)
+        clusters_eigenvalues = create_list_of_vectors_to_separate_space_of_signals(
+            self.num_clusters,
+            self.num_features,
+            config.rho_min,
+            config.rho_max,
+            config.signal_subspace_dim,
+        )
+        Ri_matrices = np.stack(
+            [
+                create_Ri_symmetric_matrix_with_constrained_eigenvalues2_ADOP(
+                    self.num_features,
+                    config.sig_rho_min,
+                    config.sig_rho_max,
+                    self.num_signal_features,
+                    clusters_eigenvalues[i],
+                    dimension_permutation,
+                )
+                for i in range(self.num_clusters)
+            ],
+            axis=0,
+        )
+
+        ## Calculate Rv based on the provided expression
+        Rv_matrices = np.einsum(
+            "ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices
+        )
+
+        # Generate feature vectors X based on the multivariate normal distribution
+        X = np.array(
+            [
+                np.random.multivariate_normal(
+                    mean=np.zeros(self.num_features), cov=Rv, size=1
+                ).flatten()
+                for Rv in Rv_matrices
+            ]
+        )
+
+        return Ri_matrices, Rv_matrices, X
 
     def create_features(self):
         ## Generate symmetric matrices Ri
