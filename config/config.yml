@@ -1,10 +1,10 @@
-mu1: 0.05
-mu2: 10
+mu1: 0.5
+mu2: 1
 eta: 0.02
-beta: 200
+beta: 100
 local_iter: 1
 cogent_iters: 400
-iter_or_cycles_to_find_next_atom: 30
+iter_or_cycles_to_find_next_atom: 10
 rho_min: 0.5                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
 sig_rho_min: 0.5                         # Minimum eigenvalue of Ri
@@ -22,7 +22,9 @@ eps: 0.0
 Enhance: False
 Abar: True
 ADMM: "L"
-train_ratio: 0.2
-lr: 0.01
-p: 0.1
-q: 0.02
+train_ratio: 0.1
+lr: 0.1
+p: 0.3
+q: 0.05
+CGD: True
+warm_start: "random"                  # "optimal" or "random" or "cluster"
