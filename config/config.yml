@@ -1,15 +1,15 @@
-mu0: 0.5
+mu0: 0.01
 mu1: 0.
-mu2: 1.
+mu2: 100.
 eta: 0.02
 beta: 100
 tau: 100
 local_iter: 1
 cogent_iters:  2500
 iter_or_cycles_to_find_next_atom: 30
-rho_min: 0.5                             # Minimum eigenvalue of Ri
+rho_min: 1                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
-sig_rho_min: 0.5                         # Minimum eigenvalue of Ri
+sig_rho_min: 1                       # Minimum eigenvalue of Ri
 sig_rho_max: 2                           # Maximum eigenvalue of Ri
 noise_level_Ri: 0.0                      # Scale of noise to adjust eigenvalues
 include_rhos: True                       # Whether rho_min and rho_max are exact eigenvalues
@@ -24,21 +24,21 @@ Enhance: False
 Abar: True
 ADMM: False
 train_ratio: 1.
-lr: 0.1
-p: 1.
-q: 0.0
+p: 0.5
+q: 0.05
 
 
-samples_per_cluster: [4, 9, 16]
-num_nodes: 29
+samples_per_cluster: [100, 100,100]
+num_nodes: 300
 num_clusters: 3
-dimension: 6
-signal_subspace_dim: 2
-initialize_atoms: "opt"   
-# initialize_atoms: "rand"   
+dimension: 3
+signal_subspace_dim: 1
+# initialize_atoms: "opt"     
+initialize_atoms: "rand"   
 # initialize_atoms: "load"
 total_iterations: 500
-local_iter_ALP: 2
-local_iter_ALM: 1
+local_iter_ALP: 5
+local_iter_ALM: 5
+lr: 0.002
 
 

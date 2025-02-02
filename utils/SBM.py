@@ -34,7 +34,8 @@ class SBM(Graph):
             np.einsum("ij,ik->ijk", self.X, self.X)
             - config.rho_min * np.eye(self.num_features)[None, :]
         )
-        self.cov_ADOP = np.einsum("ij,ik->ijk", self.X, self.X)
+        # self.cov_ADOP = np.einsum("ij,ik->ijk", self.X, self.X)
+        self.cov_ADOP = self.cov
 
     def create_partionioned_graph(self):
         """
@@ -99,16 +100,16 @@ class SBM(Graph):
         clusters_eigenvalues = create_list_of_vectors_to_separate_space_of_signals(
             self.num_clusters,
             self.num_features,
-            config.rho_min,
-            config.rho_max,
+            0,
+            config.rho_max - config.rho_min,
             config.signal_subspace_dim,
         )
         Ri_matrices = np.stack(
             [
                 create_Ri_symmetric_matrix_with_constrained_eigenvalues2_ADOP(
                     self.num_features,
-                    config.sig_rho_min,
-                    config.sig_rho_max,
+                    0,
+                    config.sig_rho_max - config.sig_rho_min,
                     self.num_signal_features,
                     clusters_eigenvalues[i],
                     dimension_permutation,
@@ -141,8 +142,8 @@ class SBM(Graph):
             [
                 create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
                     self.num_features,
-                    config.sig_rho_min,
-                    config.sig_rho_max,
+                    0,
+                    config.sig_rho_max - config.sig_rho_min,
                     self.num_signal_features,
                 )
                 for _ in range(self.num_clusters)

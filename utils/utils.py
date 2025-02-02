@@ -123,6 +123,7 @@ def initialize_atoms(
         atoms_R_opt.append(graph.Ri_matrices[i])
         atoms_b_opt.append(graph.b[i])
         coeffss_opt.append(graph.λ[i])
+    coeffss_opt = np.array(coeffss_opt)
 
     if init == "rand":
         atoms_e = []
@@ -133,7 +134,10 @@ def initialize_atoms(
             atoms_e.append(create_random_normalized_vector(config.num_nodes))
             atoms_R.append(
                 create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-                    config.dimension, config.rho_min, config.rho_max, noise_level=0.0
+                    config.dimension,
+                    0,
+                    config.rho_max - config.rho_min,
+                    noise_level=0.0,
                 )
             )
             atoms_b.append(
@@ -142,6 +146,8 @@ def initialize_atoms(
                 )[0]
             )
             coeffss.append(get_random_coef_between_1_and_(config.num_nodes))
+
+        coeffss = np.array(coeffss)
 
     elif init == "opt":
         atoms_e = atoms_e_opt
@@ -159,6 +165,8 @@ def initialize_atoms(
             atoms_R.append(np.zeros((config.dimension, config.dimension)))
             atoms_b.append(np.zeros(config.num_clusters))
             coeffss.append(0)
+
+        coeffss = np.array(coeffss)
 
     elif init == "load":
         atoms_e = init_atoms_e
@@ -188,7 +196,12 @@ def initialize_atoms(
 
 def calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs):
     sig_L = np.zeros((config.num_nodes, config.num_nodes))
-    sig_Rv_s = np.zeros((config.num_nodes, config.dimension, config.dimension))
+    # sig_Rv_s = np.zeros((config.num_nodes, config.dimension, config.dimension))
+    sig_Rv_s = config.rho_min * np.eye(config.dimension)
+    sig_Rv_s = np.tile(sig_Rv_s, (config.num_nodes, 1, 1))
+    # sig_Rv_s = np.broadcast_to(
+    #     sig_Rv_s, (config.num_nodes, config.dimension, config.dimension)
+    # )
     sig_Piv_s = np.zeros((config.num_nodes, config.num_clusters))
 
     for e, R, b, coef in zip(atoms_e, atoms_R, atoms_b, coefs):
@@ -244,8 +257,12 @@ def compute_objective_value(
         sig_L = defined_sig_L
 
     term_0 = compute_term_0(graph, sig_L)
-    term_1 = compute_term_1(graph, sig_Rv_s)
-    term_2 = compute_term_2(graph, sig_Piv_s)
+    if config.mu1 != 0:
+        term_1 = compute_term_1(graph, sig_Rv_s)
+        term_2 = compute_term_2(graph, sig_Piv_s)
+    else:
+        term_1 = 0
+        term_2 = 0
     term_3 = compute_term_3(coefs)
 
     objective = term_0 + config.mu1 * term_1 - config.mu2 * term_2 + config.mu0 * term_3
@@ -259,7 +276,7 @@ def compute_objective_value(
 
 
 def calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
-    # scale_factor = (config.rho_max / config.rho_min) ** 2
+    scale_factor = (config.rho_max / config.rho_min) ** 2
     # tmp1 = 2 * coef * grad_sig_L @ atom_e
     tmp2 = np.zeros(config.num_nodes)
     tmp3 = np.zeros(config.num_nodes)
@@ -271,6 +288,7 @@ def calc_grad_ei_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
         grad_Rv = np.einsum("nij,njk, nkl->nil", Rv_s_inv, graph.cov_ADOP, Rv_s_inv)
         grad_Ri = np.einsum("n,ij->nij", 2 * coef * atom_e, atom_R)
         tmp2 = np.einsum("nij,nij->n", grad_Ri, grad_Rv)
+        tmp2 /= scale_factor
         atom_trace_R = np.trace(atom_R)
         tmp3 = 2 * coef * atom_e * atom_trace_R
     tmp4 = 2 * coef * atom_e[graph.train_mask] * atom_b[graph.y[graph.train_mask]]
@@ -353,7 +371,7 @@ def calc_grad_atom_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv):
 def project_to_bound_ADOP(atom_e, atom_R, atom_b):
     proj_atom_e = project_to_unit_vector(atom_e)
     proj_atom_R = project_to_psd_cone_with_constrained_eigenvals(
-        atom_R, config.rho_min, config.rho_max
+        atom_R, 0, config.rho_max - config.rho_min
     )
     proj_atom_b = project_to_simplex(atom_b, 1)
     return proj_atom_e, proj_atom_R, proj_atom_b
@@ -404,21 +422,29 @@ def update_atoms_and_L_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs, sig_L):
     else:
         Rv_s_inv = None
 
-    grad_coefs = claulate_grad_coefs_ADOP(
-        graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv
-    )
+    # print(f"grad_coefs: {grad_coefs}")
     grads = []
-    for idx, (atom_e, atom_R, atom_b, coef) in enumerate(
-        zip(atoms_e, atoms_R, atoms_b, coefs)
-    ):
-        out = calc_grad_atom_ADOP(graph, atom_e, atom_R, atom_b, coef, Rv_s_inv)
-        grads.append(out)
-
-    for idx, (grad_ei, grad_Ri, grad_bi) in enumerate(grads):
-        coefs[idx] = update_coef_ADOP(coefs[idx], grad_coefs[idx], config.lr)
-        atoms_e[idx], atoms_R[idx], atoms_b[idx] = update_atom_ADOP(
-            grad_ei, grad_Ri, grad_bi, atom_e, atom_R, atom_b, config.lr
+    for idx in range(config.num_clusters):
+        grad_coefs = claulate_grad_coefs_ADOP(
+            graph, atoms_e, atoms_R, atoms_b, coefs, Rv_s_inv
         )
+        coefs[idx] = update_coef_ADOP(coefs[idx], grad_coefs[idx], config.lr)
+        grad_ei, grad_Ri, grad_bi = calc_grad_atom_ADOP(
+            graph, atoms_e[idx], atoms_R[idx], atoms_b[idx], coefs[idx], Rv_s_inv
+        )
+        # grads.append(out)
+        atoms_e[idx], atoms_R[idx], atoms_b[idx] = update_atom_ADOP(
+            grad_ei,
+            grad_Ri,
+            grad_bi,
+            atoms_e[idx],
+            atoms_R[idx],
+            atoms_b[idx],
+            config.lr,
+        )
+
+    # for idx, (grad_ei, grad_Ri, grad_bi) in enumerate(grads):
+    coefs = project_to_simplex(coefs, graph.num_nodes)
 
     sig_L -= config.lr * calculate_grad_sig_L(graph, sig_L)
 
@@ -468,7 +494,8 @@ def project_to_Atomic_Decomposition(atoms_e, sig_L, coefs):
 
 
 def project_to_positive_coefs(coefs):
-    return np.maximum(coefs, 0)
+    return project_to_simplex(coefs, config.num_nodes)
+    # return np.maximum(coefs, 0)
 
 
 def project_to_bound(a, a_min=0, a_max=1):
@@ -628,7 +655,9 @@ def plot_adj(A, name="L"):
 ###############################################################
 
 
-def log_results(atoms, coefs, graph, results, save_path, terminal=True):
+def log_results(
+    sig_L, atoms_e, atoms_R, atoms_b, coefs, graph, results, save_path, terminal=True
+):
     os.makedirs(save_path, exist_ok=True)
     LOGGER = getLOGGER(
         name=f"{now}",
@@ -636,27 +665,30 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
         save_path=save_path,
         terminal=terminal,
     )
-    sig = atoms.calc_sig(coefs)
+    # sig = atoms.calc_sig(coefs)
+    _, sig_Rv, sig_Piv = calculate_sig_from_atoms(atoms_e, atoms_R, atoms_b, coefs)
     results = {
         f"atom {id}": {
-            "e": str(np.round(atom.e, 2)),
-            "b": str(np.round(atom.b, 2)),
-            "R": str(np.round(np.linalg.eigvalsh(atom.R), 2)),
+            "e": str(np.round(atom_e, 2)),
+            "b": str(np.round(atom_b, 2)),
+            "R": str(np.round(np.linalg.eigvalsh(atom_R), 2)),
             "λ": str(np.round(c, 2)),
         }
-        for id, (c, atom) in enumerate(zip(coefs, atoms))
+        for id, (c, atom_e, atom_R, atom_b) in enumerate(
+            zip(coefs, atoms_e, atoms_R, atoms_b)
+        )
     }
 
-    mask = np.argmax(sig.pi, axis=1) == graph.y
+    mask = np.argmax(sig_Piv, axis=1) == graph.y
     # Replace True with ✔ and False with ✘
     marks = np.array(["✔" if value else "✘" for value in mask])[:, None]
 
     LOGGER.info(json.dumps(results, indent=4))
-    LOGGER.info(np.hstack((np.round(sig.pi, 2), marks)))
+    LOGGER.info(np.hstack((np.round(sig_Piv, 2), marks)))
 
-    plot_adj(sig.L)
+    plot_adj(sig_L)
 
-    y_pred = np.argmax(sig.pi, axis=1)
+    y_pred = np.argmax(sig_Piv, axis=1)
     y_pred_test = y_pred[graph.test_mask]
     if y_pred_test.shape[0] > 0:
         acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
@@ -711,7 +743,7 @@ def plot_results2(f_values, accuracies, atoms, save_path, f_opt=None):
 
     plt.figure()
     for id, atom in enumerate(atoms):
-        plt.plot(atom.e, "*-", label=f"atom {id}")
+        plt.plot(atom, "*-", label=f"atom {id}")
     plt.legend()
     plt.title("Eigenvectors")
     plt.savefig(f"{save_path}eigenvectors.png")

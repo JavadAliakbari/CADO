@@ -48,9 +48,11 @@ def ADOP(graph):
             atoms_e, atoms_R, atoms_b, coefs, sig_L = update_atoms_and_L_ADOP(
                 graph, atoms_e, atoms_R, atoms_b, coefs, sig_L
             )
+            # print(f"iter {outer_iter} - coefs: {coefs}")
 
         for itr in range(config.local_iter_ALP):
             sig_L, coefs = project_sig_L_and_coefs_ADOP(atoms_e, sig_L, coefs)
+            # print(f"iter {outer_iter} - coefs: {coefs}")
 
         f_values.append(
             compute_objective_value(
@@ -59,6 +61,7 @@ def ADOP(graph):
         )
 
         acc = calc_accuracy_ADOP(graph, atoms_e, atoms_R, atoms_b, coefs)
+        accuracies.append(acc)
 
         results = {
             f"f": f"{f_values[-1]:,.4f}",
@@ -80,6 +83,9 @@ def ADOP(graph):
         coefs_opt,
         f_opt,
         f_values,
+        accuracies,
+        results,
+        sig_L,
     )
 
 
@@ -105,8 +111,11 @@ if __name__ == "__main__":
         coefs_opt,
         f_opt,
         f_values,
+        accuracies,
+        results,
+        sig_L,
     ) = ADOP(graph)
 
-    # log_results(atoms, coefs, graph, results, save_path)
-    # plot_results2(f_values, accuracies, atoms, save_path, f_opt)
+    log_results(sig_L,atoms_e, atoms_R, atoms_b, coefs, graph, results, save_path)
+    plot_results2(f_values, accuracies, atoms_e, save_path, f_opt,)
     # save_model_params2(atoms, coefs, graph, save_path)
