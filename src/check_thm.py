@@ -6,7 +6,6 @@ from utils.SBM import SBM
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
 from Graph_Atom.graph_func import GraphFunc
-
 from utils.algorithm_utils import *
 from utils.utils import *
 
