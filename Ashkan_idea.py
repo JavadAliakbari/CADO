@@ -1,18 +1,12 @@
-import json
-from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
 from utils.SBM import SBM
-from Atom.coefs import Coefs
-from Atom.atoms import Atoms
 from Graph_Atom.graph_func import GraphFunc
 from Graph_Atom.ADMM import ADMM_cls
 
-from Graph_Atom.graph_sig import EmptySig
 from utils.algorithm_utils_orig import *
 from utils.utils import *
-import pickle as pkl
 
 # Set print options to show the entire array
 np.set_printoptions(threshold=np.inf, suppress=False)
@@ -73,7 +67,9 @@ if __name__ == "__main__":
     accuracies = []
     diff_vals = []
     Lambda_terms = []
+    Lambda_norms = []
     num_atoms = []
+    epsilsons = []
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
             for atom, coef in zip(atoms, coefs):
@@ -88,11 +84,16 @@ if __name__ == "__main__":
 
         if admm is not None:
             if config.ADMM == "L":
-                diff, lambda_term = admm.ADMM_update(sig.L)
+                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
-                diff, lambda_term = admm.ADMM_update(sig.pi)
+                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.pi)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
+            Lambda_norms.append(Lambda_norm)
+        else:
+            diff = 0
+            lambda_term = 0
+            Lambda_norm = 0
         f_sig = f(sig)
 
         y_pred = np.argmax(sig.pi, axis=1)
@@ -108,6 +109,8 @@ if __name__ == "__main__":
             "acc": acc,
             "diff": diff,
             "lambda term": lambda_term,
+            "lambda norm": Lambda_norm,
+            "f_opt": f"{f_opt:,.4f}",
         }
 
         if log_results:
@@ -116,7 +119,17 @@ if __name__ == "__main__":
         f_values.append(f_sig)
         num_atoms.append(len(atoms))
         accuracies.append(acc)
+        epsilsons.append([atoms.e.copy() for atoms in atoms])
 
     log_results(atoms, coefs, graph, results, save_path)
-    plot_results(f_values, num_atoms, accuracies, atoms, save_path, f_opt)
+    plot_results(
+        f_values,
+        accuracies,
+        Lambda_norms,
+        atoms,
+        epsilsons,
+        admm,
+        save_path,
+        f_opt,
+    )
     save_model_params(atoms, coefs, graph, admm, save_path)

@@ -47,7 +47,7 @@ class ADMM_cls:
         lambda_term = matrix_dot_product(self.Lambda, d)
         return lambda_term + config.beta / 2 * primal_term
 
-    def ADMM_update(self, L, itr):
+    def ADMM_update(self, L):
         # min Lp
         self.Lp_prev = self.Lp
         self.Lp = self.Lambda / config.beta + L

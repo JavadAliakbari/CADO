@@ -7,10 +7,10 @@ import random
 import cvxpy as cp
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
-from Graph_Atom import ADMM
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
@@ -416,7 +416,7 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
 
 
 def plot_results(
-    f_values, accuracies, Lambda_norms, atoms, Lambda, save_path, f_opt=None
+    f_values, accuracies, Lambda_norms, atoms, epsilons, admm, save_path, f_opt=None
 ):
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
@@ -442,10 +442,32 @@ def plot_results(
     plt.title("Eigenvectors")
     plt.savefig(f"{save_path}eigenvectors.png")
 
-    plot_adj(Lambda, name="Lambda")
+    fig, ax = plt.subplots()
+    max_e = np.max(epsilons)
+    min_e = np.min(epsilons)
+    ax.set_ylim(min_e, max_e)
+    ax.set_title("Eigenvectors")
+
+    def update(frame):
+        ax.clear()
+        for id, e in enumerate(epsilons[frame]):
+            ax.plot(e, "*-", label=f"atom {id}")
+        ax.legend()
+        ax.set_title(f"Eigenvectors_{frame}")
+        ax.set_ylim(min_e, max_e)
+
+    ani = FuncAnimation(fig, update, frames=len(epsilons), repeat=False)
+    ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25))
+
+    if admm is not None:
+        plt.figure()
+        plt.plot(Lambda_norms)
+        plt.title("Lambda norms")
+        plt.savefig(f"{save_path}Lambda_norms.png")
+        plot_adj(admm.Lambda, name="Lambda")
 
 
-def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):
+def save_model_params(atoms, coefs, graph, admm, save_path):
     os.makedirs(save_path, exist_ok=True)
     filename = f"{save_path}atoms.pkl"
     with open(filename, "wb") as fid:
@@ -458,7 +480,7 @@ def save_model_params(atoms, coefs, graph, admm: ADMM, save_path):
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)
 
-    if config.ADMM:
+    if admm is not None:
         filename = f"{save_path}Lambda.pkl"
         with open(filename, "wb") as fid:
             pkl.dump(admm.Lambda, fid)

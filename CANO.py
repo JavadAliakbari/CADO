@@ -84,9 +84,9 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
 
         if admm is not None:
             if config.ADMM == "L":
-                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L, ii)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
-                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi, ii)
+                diff, lambda_term, lambda_norm = admm.ADMM_update(sig.pi)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
             Lambda_norms.append(lambda_norm)
