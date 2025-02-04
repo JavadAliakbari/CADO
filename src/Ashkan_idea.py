@@ -1,6 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 
+from utils.satisfy_bound2 import satisfy_bound
 from utils.SBM import SBM
 from Graph_Atom.graph_func import GraphFunc
 from Graph_Atom.ADMM import ADMM_cls
@@ -42,8 +43,8 @@ if __name__ == "__main__":
     b = graph.b
 
     ## Initialization
-    # atoms, coefs = create_random_atoms()
-    atoms, coefs = create_optimal_atoms(graph)
+    atoms, coefs = create_random_atoms(n, num_features, c, c)
+    # atoms, coefs = create_optimal_atoms(graph)
     num_atoms = len(atoms)
 
     sig = atoms.calc_sig(coefs)
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     else:  # config.ADMM == "None"
         admm = None
 
-    f_opt = f(opt_sig)
+    f_opt = f(opt_sig, ADMM=False)
     f_sig = f(sig)
 
     bar = tqdm(total=config.cogent_iters)
@@ -72,20 +73,30 @@ if __name__ == "__main__":
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
             for atom, coef in zip(atoms, coefs):
-                grad = f.calc_grad(sig)
-                grad_atom = atom.calc_grad(grad)
-                atom.update(grad_atom, 2 * coef * config.lr)  # Update atom
+                if ii % 100000 == 0:
+                    sig2 = sig - coef * atom.calc_sig_term()
+                    grad = f.calc_grad(sig2)
+                    atom.conditional_gradient_update(grad, ii * config.local_iter + itr)
+                else:
+                    grad = f.calc_grad(sig)
+                    grad_atom = atom.calc_grad(grad)
+                    atom.update(grad_atom, 2 * coef * config.lr)  # Update atom
                 sig = atoms.calc_sig(coefs)  # Update signal
                 f_sig = f(sig)
                 f_values.append(f_sig)
-            # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
-            coefs = Enhancemnet_step(atoms, f, coefs)
+            atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
+            # atoms = satisfy_bound(atoms, coefs)
+            # coefs = Enhancemnet_step(atoms, f, coefs)
 
+        sig = atoms.calc_sig(coefs)
         if admm is not None:
-            if config.ADMM == "L":
-                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.L)
-            elif config.ADMM == "pi":
-                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.pi)
+            L = sig.L
+            for i in range(config.ADMM_iter):
+                if config.ADMM == "L":
+                    diff, lambda_term, Lambda_norm = admm.ADMM_update(L)
+                elif config.ADMM == "pi":
+                    diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.pi)
+            sig = atoms.calc_sig(coefs)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
             Lambda_norms.append(Lambda_norm)
@@ -93,7 +104,7 @@ if __name__ == "__main__":
             diff = 0
             lambda_term = 0
             Lambda_norm = 0
-        f_sig = f(sig)
+        f_sig = f(sig, ADMM=False)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]

@@ -50,3 +50,5 @@ class Atoms:
         sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
 
         return sig
+    
+    

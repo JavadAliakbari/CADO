@@ -39,8 +39,8 @@ class GraphAtom(Atom):
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
-        self.R = np.zeros((self.d, self.d))
-        self.b = np.zeros(self.c)
+        # self.R = np.zeros((self.d, self.d))
+        # self.b = np.zeros(self.c)
 
     def e_term(self):
         return np.outer(self.e, self.e)

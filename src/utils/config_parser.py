@@ -35,6 +35,7 @@ class Config:
         self.lr = self.config["lr"]
         self.p = self.config["p"]
         self.q = self.config["q"]
+        self.ADMM_iter = self.config["ADMM_iter"]
 
     def load_config(path):
         with open(path) as f:

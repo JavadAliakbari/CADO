@@ -437,7 +437,7 @@ def plot_results(
 
     plt.figure()
     for id, atom in enumerate(atoms):
-        plt.plot(atom.e, "*-", label=f"atom {id}")
+        plt.plot(atom.e, "*", label=f"atom {id}")
     plt.legend()
     plt.title("Eigenvectors")
     plt.savefig(f"{save_path}eigenvectors.png")
@@ -451,13 +451,21 @@ def plot_results(
     def update(frame):
         ax.clear()
         for id, e in enumerate(epsilons[frame]):
-            ax.plot(e, "*-", label=f"atom {id}")
+            ax.plot(e, "*", label=f"atom {id}")
         ax.legend()
         ax.set_title(f"Eigenvectors_{frame}")
         ax.set_ylim(min_e, max_e)
 
-    ani = FuncAnimation(fig, update, frames=len(epsilons), repeat=False)
-    ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25))
+    # Reduce the number of frames by skipping some
+    step = max(1, len(epsilons) // 500)
+    frames = range(0, len(epsilons), step)  # Adjust the step as needed
+
+    ani = FuncAnimation(fig, update, frames=frames, repeat=False)
+
+    # Lower the resolution
+    dpi = 80  # Adjust the DPI as needed
+
+    ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25), dpi=dpi)
 
     if admm is not None:
         plt.figure()
@@ -488,3 +496,10 @@ def save_model_params(atoms, coefs, graph, admm, save_path):
         filename = f"{save_path}Lp.pkl"
         with open(filename, "wb") as fid:
             pkl.dump(admm.Lp, fid)
+
+
+def project_atoms_sig(atoms, coefs, graph):
+    sig = atoms.calc_sig(coefs)
+    pi = project_to_simplex2(sig.pi, 1)
+    L = project_to_bound(sig.L, 0, 1)
+    return sig

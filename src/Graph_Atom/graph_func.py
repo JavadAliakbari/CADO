@@ -73,9 +73,9 @@ class GraphFunc(f):
     def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / signal.n
+        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / (signal.n)
         grad_R = self.calc_grad_R(signal) / signal.d
-        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / signal.c
+        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / (signal.c)
 
         grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad

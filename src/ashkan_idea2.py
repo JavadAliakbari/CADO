@@ -54,7 +54,7 @@ if __name__ == "__main__":
     else:  # config.ADMM == "None"
         admm = None
 
-    f_opt = f(opt_sig)
+    f_opt = f(opt_sig, ADMM=False)
     f_sig = f(sig)
 
     bar = tqdm(total=config.cogent_iters)
@@ -62,7 +62,9 @@ if __name__ == "__main__":
     accuracies = []
     diff_vals = []
     Lambda_terms = []
+    Lambda_norms = []
     num_atoms_list = []
+    epsilsons = []
     diff = 0
     Lambda_term = 0
     for ii in range(config.cogent_iters):
@@ -70,10 +72,10 @@ if __name__ == "__main__":
             # atom_idx = np.random.choice(num_atoms, 1)[0]
             # atom = atoms[atom_idx]
             # coef = coefs[atom_idx]
-            idx = np.arange(num_atoms)
-            np.random.shuffle(idx)
-            atoms.rearnge(idx)
-            coefs.rearnge(idx)
+            # idx = np.arange(num_atoms)
+            # np.random.shuffle(idx)
+            # atoms.rearnge(idx)
+            # coefs.rearnge(idx)
             for atom, coef in zip(atoms, coefs):
                 sig2 = sig - coef * atom.calc_sig_term()
                 grad = f.calc_grad(sig2)
@@ -88,12 +90,12 @@ if __name__ == "__main__":
 
         if admm is not None:
             if config.ADMM == "L":
-                diff, lambda_term = admm.ADMM_update(sig.L)
+                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
-                diff, lambda_term = admm.ADMM_update(sig.pi)
+                diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.pi)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
-        f_sig = f(sig)
+        f_sig = f(sig, ADMM=False)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -108,6 +110,8 @@ if __name__ == "__main__":
             "acc": acc,
             "diff": diff,
             "lambda term": lambda_term,
+            "Lambda norm": Lambda_norm,
+            "f_opt": f"{f_opt:,.4f}",
         }
 
         bar.set_postfix(results)
@@ -115,11 +119,22 @@ if __name__ == "__main__":
         f_values.append(f_sig)
         num_atoms_list.append(len(atoms))
         accuracies.append(acc)
+        Lambda_norms.append(Lambda_norm)
+        epsilsons.append([atoms.e.copy() for atoms in atoms])
 
         # if ii % 100000 == 0:
         #     log_results(atoms, coefs, graph, results, save_path, terminal=False)
         #     plot_results(f_values, num_atoms, accuracies, atoms, save_path)
 
     log_results(atoms, coefs, graph, results, save_path)
-    plot_results(f_values, num_atoms_list, accuracies, atoms, save_path, f_opt)
+    plot_results(
+        f_values,
+        accuracies,
+        Lambda_norms,
+        atoms,
+        epsilsons,
+        admm,
+        save_path,
+        f_opt,
+    )
     save_model_params(atoms, coefs, graph, admm, save_path)
