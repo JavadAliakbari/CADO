@@ -44,7 +44,10 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     accuracies = []
     diff_vals = []
     Lambda_terms = []
-    Lambda_norms = [np.linalg.norm(admm.Lambda)]
+    if admm is not None:
+        Lambda_norms = [np.linalg.norm(admm.Lambda)]
+    else:
+        Lambda_norms = []
     epsilsons = []
     components = []
     diff = 0
@@ -86,7 +89,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                 f_values.append(f_sig)
                 # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
                 # coefs = Enhancemnet_step(atoms, f, coefs)
-            if ii % 1000 == 0:
+            if ii % 1 == 0:
                 coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
@@ -131,13 +134,12 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         components.append([L_term, R_term, pi_term, ADMM_term])
 
         # check if the algorithm converged:
-        if (
-            ii > 0
-            and np.abs(f_values[-1] - f_values[-2]) < 1e-4
-            and np.abs(Lambda_terms[-1]) < 1e-3
-            and np.abs(diff_vals[-1]) < 1e-5
-        ):
-            break
+        # if ii > 0 and np.abs(f_values[-1] - f_values[-2]) < 1e-4:
+        #     if admm is None:
+        #         break
+        #     else:
+        #         if np.abs(Lambda_terms[-1]) < 1e-3 and np.abs(diff_vals[-1]) < 1e-5:
+        #             break
 
     return (
         atoms,

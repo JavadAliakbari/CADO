@@ -51,10 +51,14 @@ if __name__ == "__main__":
     )
     plot_adj(graph.A, name="A")
 
+
     # Run spectral clustering
+    n_clusters = c  # Number of clusters
     cluster_labels = run_spectral_clustering(graph, n_clusters)
-    # Calculate ARI score
-    ari = adjusted_rand_score(graph.y, cluster_labels)
+    plt.figure()
+    plt.plot(cluster_labels)
+    plt.title("Cluster labels")
+    plt.savefig(f"{save_path}/cluster_labels.png")
 
     admm = None
     if config.warm_start == "random":

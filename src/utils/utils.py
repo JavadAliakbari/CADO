@@ -430,7 +430,8 @@ def plot_results(
     plt.figure()
     plt.plot(f_values)
     plt.title("Loss")
-    plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
+    if len(f_values) > 10:
+        plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
