@@ -52,6 +52,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     components = []
     diff = 0
     Lambda_term = 0
+    # coefs.update_coefficients(coefs_opt.get_coefs())
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
             # atom_idx = np.random.choice(num_atoms, 1)[0]
@@ -61,9 +62,9 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             np.random.shuffle(idx)
             # atoms.rearnge(idx)
             # coefs.rearnge(idx)
-            sig = atoms.calc_sig(coefs)  # Update signal
             for ind in idx:
                 if config.CGD:
+                    sig = atoms.calc_sig(coefs)  # Update signal
                     sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
                     # new_atoms = deepcopy(atoms)
                     # new_atoms.remove_atom(new_atoms[ind])
@@ -84,15 +85,16 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                     atoms[ind].update(
                         grad_atom, 2 * coefs[ind] * config.lr
                     )  # Update atom
-                sig = atoms.calc_sig(coefs)  # Update signal
-                f_sig = f(sig)
-                f_values.append(f_sig)
+                # sig = atoms.calc_sig(coefs)  # Update signal
                 # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
                 # coefs = Enhancemnet_step(atoms, f, coefs)
-            if ii % 1 == 0:
+            # f_sig = f(sig)
+            # f_values.append(f_sig)
+            if ii % 10 == 0:
                 coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
+            sig = atoms.calc_sig(coefs)
             if config.ADMM == "L":
                 diff, lambda_term, lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
@@ -105,6 +107,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             lambda_term = 0
             lambda_norm = 0
 
+        sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)

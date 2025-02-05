@@ -83,11 +83,11 @@ class GraphFunc(f):
     def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / (signal.n * config.p)
+        grad_L = self.calc_grad_L(signal, ADMM=ADMM)
         grad_R = self.calc_grad_R(signal) / signal.d
         grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / (signal.c * config.train_ratio)
 
-        grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
+        grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
     def calc_grad_L(self, signal: GraphSig, ADMM=config.ADMM):
@@ -97,9 +97,9 @@ class GraphFunc(f):
             grad_admm = 0
 
         if config.Abar:
-            return -self.graph.Abar + grad_admm
+            return (-self.graph.Abar) / (signal.n * config.p) + grad_admm
         else:
-            return -self.graph.A + signal.L + grad_admm
+            return (-self.graph.A + signal.L) / (signal.n * config.p) + grad_admm
         # return self.graph.A
 
     # def calc_grad_R(self, signal: GraphSig):

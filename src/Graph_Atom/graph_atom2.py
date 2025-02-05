@@ -50,7 +50,7 @@ class GraphAtom(Atom):
         e_term = self.e_term()
         R_term = self.R_term()
         b_term = self.b_term()
-        sig = GraphSig(e_term, R_term, b_term, add_eps=True)
+        sig = GraphSig(e_term, R_term, b_term)
         return sig
 
     # def update_e(self, e):

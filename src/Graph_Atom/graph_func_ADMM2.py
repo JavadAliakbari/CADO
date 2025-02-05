@@ -78,7 +78,7 @@ class GraphFuncADMM(GraphFunc):
         grad_R = self.calc_grad_R(signal)
         grad_pi = self.calc_grad_pi(signal)
 
-        grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
+        grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
     def calc_grad_L(self, signal: GraphSig):

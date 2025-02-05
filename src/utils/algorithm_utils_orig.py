@@ -129,11 +129,7 @@ def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
     # coefs.update_coefficients(c)
 
     coefs.add_coef(config.tau)
-    # Line 6 of CoGEnT
-    if config.line_search:
-        gamma = Gamma_line_search(atoms, f, coefs)
-    else:
-        gamma = 2 / (itr + 3)
+    gamma = 2 / (itr + 3)
 
     # Line 7 of CoGEnT(Line Search)
     coefs.scale_coefficients(factor=gamma, id=len(coefs) - 1)

@@ -3,7 +3,7 @@ from utils.utils import *
 
 
 class GraphSig(Sig):
-    def __init__(self, L, Rv, pi, add_eps=True) -> None:
+    def __init__(self, L, Rv, pi) -> None:
         super().__init__()
         self.n = L.shape[0]
         self.c = pi.shape[-1]
@@ -14,8 +14,6 @@ class GraphSig(Sig):
             self.d = Rv.shape[-1]
             eyes = np.eye(self.d)[None, :]
             self.Rv = Rv
-            if add_eps:
-                self.Rv += config.eps * eyes
         else:
             self.Rv = None
             self.d = None
@@ -49,7 +47,7 @@ class GraphSig(Sig):
             L = self.L + sig
             Rv = self.Rv + sig
             pi = self.pi + sig
-        sig = GraphSig(L, Rv, pi, add_eps=False)
+        sig = GraphSig(L, Rv, pi)
 
         return sig
 
@@ -57,7 +55,7 @@ class GraphSig(Sig):
         L = self.L + c
         Rv = self.Rv + c
         pi = self.pi + c
-        sig = GraphSig(L, Rv, pi, add_eps=False)
+        sig = GraphSig(L, Rv, pi)
 
         return sig
 
@@ -70,21 +68,21 @@ class GraphSig(Sig):
             L = self.L - sig
             Rv = self.Rv - sig
             pi = self.pi - sig
-        sig = GraphSig(L, Rv, pi, add_eps=False)
+        sig = GraphSig(L, Rv, pi)
         return sig
 
     def __mul__(self, c):
         L = c * self.L
         Rv = c * self.Rv
         pi = c * self.pi
-        sig = GraphSig(L, Rv, pi, add_eps=False)
+        sig = GraphSig(L, Rv, pi)
         return sig
 
     def __rmul__(self, c):
         L = c * self.L
         Rv = c * self.Rv
         pi = c * self.pi
-        sig = GraphSig(L, Rv, pi, add_eps=False)
+        sig = GraphSig(L, Rv, pi)
         return sig
 
     def get_params(self):
