@@ -45,7 +45,10 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     diff_vals = []
     Lambda_terms = []
     Lambda_norms = [np.linalg.norm(admm.Lambda)]
+    epsilsons = []
+    components = []
     diff = 0
+    Lambda_term = 0
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
             # atom_idx = np.random.choice(num_atoms, 1)[0]
@@ -53,34 +56,38 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             # coef = coefs[atom_idx]
             idx = np.arange(num_atoms)
             np.random.shuffle(idx)
-            atoms.rearnge(idx)
-            coefs.rearnge(idx)
-            for ind, (atom, coef) in enumerate(zip(atoms, coefs)):
-                sig2 = sig - coef * atom.calc_sig_term()
-                # new_atoms = deepcopy(atoms)
-                # new_atoms.remove_atom(new_atoms[ind])
-                # new_coefs = deepcopy(coefs)
-                # new_coefs.remove_coef(ind)
-                # new_c = project_to_simplex(new_coefs, config.tau)
-                # new_coefs.update_coefficients(new_c)
-                # sig2 = new_atoms.calc_sig(new_coefs)
-                grad = f.calc_grad(sig2)
-                # grad_atom = atom.calc_grad(grad)
-                # atom.update(grad_atom, 2 * coef * 0.1)  # Update atom
-                atom.conditional_gradient_update(grad, ii * config.local_iter + itr)
+            # atoms.rearnge(idx)
+            # coefs.rearnge(idx)
+            sig = atoms.calc_sig(coefs)  # Update signal
+            for ind in idx:
+                if config.CGD:
+                    sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
+                    # new_atoms = deepcopy(atoms)
+                    # new_atoms.remove_atom(new_atoms[ind])
+                    # new_coefs = deepcopy(coefs)
+                    # new_coefs.remove_coef(ind)
+                    # new_c = project_to_simplex(new_coefs, config.tau)
+                    # new_coefs.update_coefficients(new_c)
+                    # sig2 = new_atoms.calc_sig(new_coefs)
+                    grad = f.calc_grad(sig2)
+                    # grad_atom = atom.calc_grad(grad)
+                    # atom.update(grad_atom, 2 * coef * 0.1)  # Update atom
+                    atoms[ind].conditional_gradient_update(
+                        grad, ii * config.local_iter + itr
+                    )
+                else:
+                    grad = f.calc_grad(sig)
+                    grad_atom = atoms[ind].calc_grad(grad)
+                    atoms[ind].update(
+                        grad_atom, 2 * coefs[ind] * config.lr
+                    )  # Update atom
                 sig = atoms.calc_sig(coefs)  # Update signal
-                # Line 6 of CoGEnT
-                # if config.line_search:
-                #     gamma = Gamma_line_search(atoms, f, coefs)
-                # else:
-                #     gamma = 2 / (itr + 3)
-
-                # Line 7 of CoGEnT(Line Search)
-                # coefs.scale_coefficients(factor=gamma, id=ind)
                 f_sig = f(sig)
                 f_values.append(f_sig)
                 # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
                 # coefs = Enhancemnet_step(atoms, f, coefs)
+            if ii % 1000 == 0:
+                coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
             if config.ADMM == "L":
@@ -90,8 +97,12 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
             Lambda_norms.append(lambda_norm)
+        else:
+            diff = 0
+            lambda_term = 0
+            lambda_norm = 0
 
-        f_sig = f(sig, ADMM=False)
+        f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -106,7 +117,8 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             "diff": diff,
             "lambda term": lambda_term,
             "lambda norm": f"{lambda_norm:,.4f}",
-            "beta": config.beta,
+            "f_opt": f"{f_opt:,.4f}",
+            # "beta": config.beta,
         }
 
         # if log_results:
@@ -114,6 +126,9 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         bar.update()
         f_values.append(f_sig)
         accuracies.append(acc)
+        Lambda_norms.append(lambda_norm)
+        epsilsons.append([atoms.e.copy() for atoms in atoms])
+        components.append([L_term, R_term, pi_term, ADMM_term])
 
         # check if the algorithm converged:
         if (
@@ -134,4 +149,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         f_opt,
         admm,
         Lambda_norms,
+        epsilsons,
+        components,
     )

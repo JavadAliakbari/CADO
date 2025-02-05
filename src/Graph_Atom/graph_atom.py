@@ -137,20 +137,34 @@ class GraphAtom(Atom):
             else 1
         )
         th_old = np.inf
+        self.initialize(self.n, self.d, self.c)
 
         for it in range(max_iter):
-            λ = self.update_e(grad, it, itr)
-
-            if config.mu1 != 0:
-                self.update_R(grad, it, itr)
-
-            if config.mu2 != 0:
-                self.update_b(grad)
+            λ = self.CG_update_step(grad, it, itr)
 
             th = grad.dot(self.calc_sig_term())
             if abs(th_old - th) < 1e-6:
                 break
             th_old = th
+
+        return λ
+
+    def CG_update_step(self, grad: GraphSig, it=0, itr=0):
+        """
+        Perform a conditional gradient to update the atom.
+
+        Parameters:
+        - grad: grad of function f
+
+        Returns:
+        - A new atom
+        """
+        λ = self.update_e(grad, it, itr)
+        if config.mu1 != 0:
+            self.update_R(grad, it, itr)
+
+        if config.mu2 != 0:
+            self.update_b(grad)
 
         return λ
 
@@ -189,7 +203,7 @@ class GraphAtom(Atom):
         return λ
 
     ## Step 2: Fix epsilon and b, update R
-    def update_R(self, grad: GraphSig, iter, itr=0):
+    def update_R(self, grad: GraphSig, iter=0, itr=0):
         grad_R = self.calc_grad_Ri(grad)
         # grad_R = np.einsum("ijk,i->jk", grad.Rv, atom.e**2)
 

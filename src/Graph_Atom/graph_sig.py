@@ -99,6 +99,12 @@ class GraphSig(Sig):
         term3 = matrix_dot_product(self.pi, sig.pi)
         return term1 + term2 + term3
 
+    def update(self, grad, lr):
+        self.L -= lr * grad.L
+        if self.Rv is not None and grad.Rv is not None:
+            self.Rv -= lr * grad.Rv
+        self.pi -= lr * grad.pi
+
 
 class EmptySig(GraphSig):
     def __init__(self, n, d, c) -> None:

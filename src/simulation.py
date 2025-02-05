@@ -66,7 +66,19 @@ if __name__ == "__main__":
             ari = adjusted_rand_score(graph.y, cluster_labels)
             acc_clustering.append(ari)
 
-            atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
+            admm = None
+            if config.warm_start == "random":
+                atoms, coefs = create_random_atoms(n, num_features, c, c)
+            elif config.warm_start == "optimal":
+                atoms, coefs = create_optimal_atoms(graph)
+            elif config.warm_start == "cluster":
+                atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
+            elif config.warm_start == "load":
+                path = "results/20250203_004544/"
+                atoms, coefs, graph, Lp, Lambda = load_atom(path)
+                admm = ADMM_cls(Lp, project_to_bound)
+                admm.Lambda = Lambda
+
             sig = atoms.calc_sig(coefs)
             f = GraphFunc(graph=graph)
             f_sc = f(sig)
@@ -82,17 +94,21 @@ if __name__ == "__main__":
                 f_opt,
                 admm,
                 Lambda_norms,
-            ) = CANO(graph, atoms, coefs, log_results=False)
+                epsilsons,
+                components,
+            ) = CANO(graph, atoms, coefs, admm, log_results=False)
             # ) = CANO(graph)
             # ) = CANO(graph, atoms, coefs, admm)
 
-            # log_results(atoms, coefs, graph, results, save_path)
+            log_results(atoms, coefs, graph, results, save_path)
             plot_results(
                 f_values,
                 accuracies,
                 Lambda_norms,
                 atoms,
-                admm.Lambda,
+                epsilsons,
+                components,
+                admm,
                 save_path,
                 f_opt,
             )

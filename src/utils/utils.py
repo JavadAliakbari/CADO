@@ -14,9 +14,9 @@ import numpy as np
 from utils.config_parser import Config
 from utils.logger import getLOGGER
 
-# seed = 4
-# random.seed(seed)
-# np.random.seed(seed)
+seed = 4
+random.seed(seed)
+np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -416,7 +416,15 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
 
 
 def plot_results(
-    f_values, accuracies, Lambda_norms, atoms, epsilons, admm, save_path, f_opt=None
+    f_values,
+    accuracies,
+    Lambda_norms,
+    atoms,
+    epsilons,
+    components,
+    admm,
+    save_path,
+    f_opt=None,
 ):
     os.makedirs(save_path, exist_ok=True)
     plt.figure()
@@ -426,6 +434,23 @@ def plot_results(
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
+    plt.figure()
+    L = [component[0] for component in components]
+    R = [component[1] for component in components]
+    pi = [component[2] for component in components]
+    ADMM = [component[3] for component in components]
+    plt.plot(L, label="L")
+    plt.plot(R, label="R")
+    plt.plot(pi, label="pi")
+    plt.plot(ADMM, label="ADMM")
+    plt.plot(f_values, label="f")
+    plt.title("Loss")
+    plt.yscale("log")
+    plt.legend()
+    # plt.ylim(min(f_values[100:]) - 1, max(f_values[100:]) + 1)
+    plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
+    # plt.yscale("log")
+    plt.savefig(f"{save_path}loss2.png")
     plt.figure()
     plt.plot(accuracies)
     plt.title("Accuracy")

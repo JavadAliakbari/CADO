@@ -63,6 +63,7 @@ if __name__ == "__main__":
     diff_vals = []
     Lambda_terms = []
     Lambda_norms = []
+    components = []
     num_atoms_list = []
     epsilsons = []
     diff = 0
@@ -72,20 +73,24 @@ if __name__ == "__main__":
             # atom_idx = np.random.choice(num_atoms, 1)[0]
             # atom = atoms[atom_idx]
             # coef = coefs[atom_idx]
-            # idx = np.arange(num_atoms)
-            # np.random.shuffle(idx)
+            idx = np.arange(num_atoms)
+            np.random.shuffle(idx)
             # atoms.rearnge(idx)
             # coefs.rearnge(idx)
-            for atom, coef in zip(atoms, coefs):
-                sig2 = sig - coef * atom.calc_sig_term()
+            sig = atoms.calc_sig(coefs)  # Update signal
+            for ind in idx:
+                sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
                 grad = f.calc_grad(sig2)
                 # grad_atom = atom.calc_grad(grad)
                 # atom.update(grad_atom, 2 * coef * 0.1)  # Update atom
-                atom.conditional_gradient_update(grad, ii * config.local_iter + itr)
+                atoms[ind].conditional_gradient_update(
+                    grad, ii * config.local_iter + itr
+                )
                 sig = atoms.calc_sig(coefs)  # Update signal
                 f_sig = f(sig)
                 f_values.append(f_sig)
                 # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
+        if ii % 1000 == 0:
             coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
@@ -95,7 +100,12 @@ if __name__ == "__main__":
                 diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.pi)
             diff_vals.append(diff)
             Lambda_terms.append(lambda_term)
-        f_sig = f(sig, ADMM=False)
+            Lambda_norms.append(Lambda_norm)
+        else:
+            diff = 0
+            lambda_term = 0
+            Lambda_norm = 0
+        f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -121,6 +131,7 @@ if __name__ == "__main__":
         accuracies.append(acc)
         Lambda_norms.append(Lambda_norm)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
+        components.append([L_term, R_term, pi_term, ADMM_term])
 
         # if ii % 100000 == 0:
         #     log_results(atoms, coefs, graph, results, save_path, terminal=False)
@@ -133,6 +144,7 @@ if __name__ == "__main__":
         Lambda_norms,
         atoms,
         epsilsons,
+        components,
         admm,
         save_path,
         f_opt,

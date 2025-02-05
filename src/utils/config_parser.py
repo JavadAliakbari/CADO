@@ -35,7 +35,8 @@ class Config:
         self.lr = self.config["lr"]
         self.p = self.config["p"]
         self.q = self.config["q"]
-        self.ADMM_iter = self.config["ADMM_iter"]
+        self.CGD = self.config["CGD"]
+        self.warm_start = self.config["warm_start"]
 
     def load_config(path):
         with open(path) as f:

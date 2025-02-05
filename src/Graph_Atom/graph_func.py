@@ -15,16 +15,39 @@ class GraphFunc(f):
     def set_ADMM_params(self, admm):
         self.admm = admm
 
-    def __call__(self, signal: GraphSig, ADMM=config.ADMM):
+    def __call__(self, signal: GraphSig, ADMM=config.ADMM, components=False):
         if signal is None:
             return 0
 
+        L_term = self.calc_L(signal)
+        R_term = self.calc_R(signal)
+        pi_term = self.calc_pi(signal)
+
+        # term5
+        if self.admm is not None and ADMM == "L":
+            admm_term = self.admm.admm_value(signal.L)
+        elif self.admm is not None and ADMM == "pi":
+            admm_term = self.admm.admm_value(signal.pi)
+        else:
+            admm_term = 0
+
+        obj = L_term + R_term + pi_term + admm_term
+
+        if components:
+            return obj, L_term, R_term, pi_term, admm_term
+        else:
+            return obj
+
+    def calc_L(self, signal: GraphSig):
         if config.Abar:
-            term_1 = -matrix_dot_product(self.graph.Abar, signal.L) / signal.n
+            L_term = -matrix_dot_product(self.graph.Abar, signal.L) / signal.n
         else:
             r = self.graph.A - signal.L
-            term_1 = 0.5 * matrix_dot_product(r, r) / signal.n
+            L_term = 0.5 * matrix_dot_product(r, r) / signal.n
 
+        return L_term
+
+    def calc_R(self, signal: GraphSig):
         # term2
         if config.mu1 != 0:
             if signal.Rv_inv is None:
@@ -35,12 +58,15 @@ class GraphFunc(f):
             term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / signal.d
 
             # term3
-            # term_3 = np.sum(np.log(np.linalg.det(signal.Rv)))
-            term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
+            term_3 = np.sum(np.log(np.linalg.det(signal.Rv))) / signal.d
+            # term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
         else:
             term_2 = 0
             term_3 = 0
 
+        return config.mu1 * term_2 + config.mu1 * term_3
+
+    def calc_pi(self, signal: GraphSig):
         # term4
         if config.mu2 != 0:
             train_labels = self.graph.y[self.graph.train_mask]
@@ -49,23 +75,7 @@ class GraphFunc(f):
         else:
             term_4 = 0
 
-        # term5
-        if self.admm is not None and ADMM == "L":
-            admm_term = self.admm.admm_value(signal.L)
-        elif self.admm is not None and ADMM == "pi":
-            admm_term = self.admm.admm_value(signal.pi)
-        else:
-            admm_term = 0
-
-        obj = (
-            term_1
-            + config.mu1 * term_2
-            + config.mu1 * term_3
-            - config.mu2 * term_4
-            + admm_term
-        )
-
-        return obj
+        return -config.mu2 * term_4
 
     def calc_cov(self):
         return self.graph.cov
@@ -73,9 +83,9 @@ class GraphFunc(f):
     def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / (signal.n)
+        grad_L = self.calc_grad_L(signal, ADMM=ADMM) / (signal.n * config.p)
         grad_R = self.calc_grad_R(signal) / signal.d
-        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / (signal.c)
+        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / (signal.c * config.train_ratio)
 
         grad = GraphSig(grad_L, grad_R, grad_pi, add_eps=False)
         return grad
@@ -109,7 +119,10 @@ class GraphFunc(f):
         # gradient_Rv = Rv_inv - np.einsum(
         #     "ijk,ikm,imn->ijn", Rv_inv, self.graph.cov, Rv_inv
         # )
-        gradient_Rv = np.eye(self.graph.num_features)[None, :] - np.einsum(
+        # gradient_Rv = np.eye(self.graph.num_features)[None, :] - np.einsum(
+        #     "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
+        # )
+        gradient_Rv = signal.Rv_inv - np.einsum(
             "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
         )
 

@@ -68,8 +68,11 @@ if __name__ == "__main__":
     diff_vals = []
     Lambda_terms = []
     Lambda_norms = []
-    num_atoms = []
+    components = []
+    num_atoms_list = []
     epsilsons = []
+    diff = 0
+    Lambda_term = 0
     for ii in range(config.cogent_iters):
         for itr in range(config.local_iter):
             for atom, coef in zip(atoms, coefs):
@@ -104,7 +107,7 @@ if __name__ == "__main__":
             diff = 0
             lambda_term = 0
             Lambda_norm = 0
-        f_sig = f(sig, ADMM=False)
+        f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -123,13 +126,18 @@ if __name__ == "__main__":
             "f_opt": f"{f_opt:,.4f}",
         }
 
-        if log_results:
-            bar.set_postfix(results)
-            bar.update()
+        bar.set_postfix(results)
+        bar.update()
         f_values.append(f_sig)
         num_atoms.append(len(atoms))
         accuracies.append(acc)
+        Lambda_norms.append(Lambda_norm)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
+        components.append([L_term, R_term, pi_term, ADMM_term])
+
+        # if ii % 100000 == 0:
+        #     log_results(atoms, coefs, graph, results, save_path, terminal=False)
+        #     plot_results(f_values, num_atoms, accuracies, atoms, save_path)
 
     log_results(atoms, coefs, graph, results, save_path)
     plot_results(
@@ -138,6 +146,7 @@ if __name__ == "__main__":
         Lambda_norms,
         atoms,
         epsilsons,
+        components,
         admm,
         save_path,
         f_opt,
