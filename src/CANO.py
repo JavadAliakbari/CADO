@@ -39,13 +39,13 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     f_sig = f(sig, ADMM=False)
 
     # if log_results:
-    bar = tqdm(total=config.cogent_iters, leave=False)
+    bar = tqdm(total=config.iters, leave=False)
     f_values = [f_sig]
     accuracies = []
     diff_vals = []
     Lambda_terms = []
     if admm is not None:
-        Lambda_norms = [np.linalg.norm(admm.Lambda)]
+        Lambda_norms = [np.linalg.norm(admm.Z)]
     else:
         Lambda_norms = []
     epsilsons = []
@@ -53,7 +53,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
     diff = 0
     Lambda_term = 0
     # coefs.update_coefficients(coefs_opt.get_coefs())
-    for ii in range(config.cogent_iters):
+    for ii in range(config.iters):
         for itr in range(config.local_iter):
             # atom_idx = np.random.choice(num_atoms, 1)[0]
             # atom = atoms[atom_idx]
@@ -74,8 +74,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                     # new_coefs.update_coefficients(new_c)
                     # sig2 = new_atoms.calc_sig(new_coefs)
                     grad = f.calc_grad(sig2)
-                    # grad_atom = atom.calc_grad(grad)
-                    # atom.update(grad_atom, 2 * coef * 0.1)  # Update atom
                     atoms[ind].conditional_gradient_update(
                         grad, ii * config.local_iter + itr
                     )
@@ -90,7 +88,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                 # coefs = Enhancemnet_step(atoms, f, coefs)
             # f_sig = f(sig)
             # f_values.append(f_sig)
-            if ii % 10 == 0:
+            if ii % 1 == 0:
                 coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:

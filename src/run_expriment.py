@@ -5,6 +5,7 @@ from tqdm import tqdm
 from CANO import CANO
 from Graph_Atom.ADMM import ADMM_cls
 from load_atom import load_atom
+from main import CANO2
 from utils.algorithm_utils_orig import *
 from utils.SBM import SBM
 from utils.utils import *
@@ -51,7 +52,6 @@ if __name__ == "__main__":
     )
     plot_adj(graph.A, name="A")
 
-
     # Run spectral clustering
     n_clusters = c  # Number of clusters
     cluster_labels = run_spectral_clustering(graph, n_clusters)
@@ -71,7 +71,7 @@ if __name__ == "__main__":
         path = "results/20250203_004544/"
         atoms, coefs, graph, Lp, Lambda = load_atom(path)
         admm = ADMM_cls(Lp, project_to_bound)
-        admm.Lambda = Lambda
+        admm.Z = Lambda
 
     sig = atoms.calc_sig(coefs)
     f = GraphFunc(graph=graph)
@@ -89,7 +89,7 @@ if __name__ == "__main__":
         Lambda_norms,
         epsilsons,
         components,
-    ) = CANO(graph, atoms, coefs, admm, log_results=False)
+    ) = CANO2(graph, atoms, coefs, admm, log_results=False)
     # ) = CANO(graph)
     # ) = CANO(graph, atoms, coefs, admm)
 

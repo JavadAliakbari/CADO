@@ -85,6 +85,26 @@ class GraphSig(Sig):
         sig = GraphSig(L, Rv, pi)
         return sig
 
+    def __truediv__(self, c):
+        if c == 0:
+            raise ValueError("Division by zero is not allowed")
+        L = self.L / c
+        if self.Rv is not None:
+            Rv = self.Rv / c
+        pi = self.pi / c
+        sig = GraphSig(L, Rv, pi)
+        return sig
+    
+    def __rtruediv__(self, c):
+        if isinstance(c, (int, float)):
+            L = c / self.L
+            Rv = c / self.Rv if self.Rv is not None else None
+            pi = c / self.pi
+            sig = GraphSig(L, Rv, pi)
+            return sig
+        else:
+            raise ValueError("Right division is only supported for scalars")
+
     def get_params(self):
         return self.n, self.d, self.c
 
@@ -103,6 +123,12 @@ class GraphSig(Sig):
             self.Rv -= lr * grad.Rv
         self.pi -= lr * grad.pi
 
+    def project(self):
+        self.L = project_to_bound(self.L)
+        # if self.Rv is not None:
+        #     self.Rv = project(self.Rv)
+        # self.pi = project(self.pi)
+
 
 class EmptySig(GraphSig):
     def __init__(self, n, d, c) -> None:
@@ -112,6 +138,6 @@ class EmptySig(GraphSig):
 
         self.L = np.zeros((self.n, self.n), dtype=float)
         self.Rv = np.array([config.rho_min * np.eye(self.d) for _ in range(self.n)])
-        self.pi = np.array([np.zeros(c) / c for _ in range(self.n)])
+        self.pi = np.array([np.zeros(c) for _ in range(self.n)])
         self.Rv_inv = None
         self.Rz = None

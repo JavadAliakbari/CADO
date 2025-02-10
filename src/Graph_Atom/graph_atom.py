@@ -30,6 +30,7 @@ class GraphAtom(Atom):
         self.e = np.random.randn(self.n)
         # self.e = 0.5 + 0.5 * np.random.randn(self.n)
         # self.e = np.ones(self.n)
+        # self.e = np.zeros(self.n)
         self.e /= np.linalg.norm(self.e)
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
             self.d,
@@ -73,9 +74,9 @@ class GraphAtom(Atom):
     def calc_grad(self, grad_sig: GraphSig):
         if grad_sig is None:
             return 0
-        grad_ei = self.calc_grad_ei(grad_sig) / grad_sig.n
-        grad_Ri = self.calc_grad_Ri(grad_sig) / grad_sig.d
-        grad_bi = self.calc_grad_bi(grad_sig) / grad_sig.c
+        grad_ei = self.calc_grad_ei(grad_sig)
+        grad_Ri = self.calc_grad_Ri(grad_sig)
+        grad_bi = self.calc_grad_bi(grad_sig)
 
         grad = GraphAtom()
         grad.set_params(grad_ei, grad_Ri, grad_bi)
@@ -115,11 +116,30 @@ class GraphAtom(Atom):
 
     def project_to_bound(self):
         self.e = project_to_unit_vector(self.e)
-        self.R = project_to_psd_cone(self.R, config.rho_min, config.rho_max)
+        self.R = project_to_psd_cone(self.R, 0, config.rho_max - config.rho_min)
         self.b = project_to_simplex(self.b, 1)
 
     def __str__(self):
         return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
+
+    def proximal_to_sig(self, sig: GraphSig):
+        # λ, evecs_large = sc.linalg.eigh(sig.L, subset_by_index=(self.n - 1, self.n - 1))
+        λ, evecs_large = np.linalg.eigh(sig.L)
+        self.e = evecs_large[:, -1]
+        λ = λ[-1] - config.mu0 / config.beta
+        if λ < 0:
+            λ = 0
+            return λ
+
+        if config.mu1 != 0:
+            self.Ri = (np.einsum("ijk,i->jk", sig.Rv, self.e**2)) / λ
+            self.Ri = project_to_psd_cone(self.Ri, 0, config.rho_max - config.rho_min)
+
+        if config.mu2 != 0:
+            self.b = np.einsum("i, ij-> j", self.e**2, sig.pi) / λ
+            self.b = project_to_simplex(self.b, 1)
+
+        return λ
 
     def conditional_gradient_update(self, grad: GraphSig, itr):
         """

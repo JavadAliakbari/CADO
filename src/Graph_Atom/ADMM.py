@@ -6,7 +6,7 @@ from utils.utils import *
 class ADMM_cls:
     def __init__(self, L, constrint_func=project_to_bound):
         self.projection_func = constrint_func
-        self.Lambda = deepcopy(L)
+        self.Z = deepcopy(L)
         self.Lp = deepcopy(L)
         self.Lp = constrint_func(self.Lp)
         self.Lp_prev = None
@@ -44,22 +44,22 @@ class ADMM_cls:
         n = L.shape[1]
         d = L - self.Lp
         primal_term = matrix_dot_product(d, d)
-        lambda_term = matrix_dot_product(self.Lambda, d)
+        lambda_term = matrix_dot_product(self.Z, d)
         return lambda_term + config.beta / 2 * primal_term
 
     def ADMM_update(self, L):
         # min Lp
         self.Lp_prev = self.Lp
-        self.Lp = self.Lambda / config.beta + L
+        self.Lp = self.Z / config.beta + L
         self.Lp = self.projection_func(self.Lp)
 
         # max Lambda
         d = L - self.Lp
-        self.Lambda += config.beta * d
+        self.Z += config.beta * d
         diff = matrix_dot_product(d, d)
 
-        lambda_term = matrix_dot_product(self.Lambda, d)
-        lambda_norm = np.linalg.norm(self.Lambda)
+        lambda_term = matrix_dot_product(self.Z, d)
+        lambda_norm = np.linalg.norm(self.Z)
 
         # # Adaptive ADMM update
         # primal_residual = np.linalg.norm(d)
@@ -71,4 +71,4 @@ class ADMM_cls:
         return diff, lambda_term, lambda_norm
 
     def calc_grad(self, L):
-        return config.beta * (L - self.Lp) + self.Lambda
+        return config.beta * (L - self.Lp) + self.Z

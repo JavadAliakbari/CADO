@@ -57,7 +57,7 @@ if __name__ == "__main__":
     f_opt = f(opt_sig, ADMM=False)
     f_sig = f(sig)
 
-    bar = tqdm(total=config.cogent_iters)
+    bar = tqdm(total=config.iters)
     f_values = []
     accuracies = []
     diff_vals = []
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     epsilsons = []
     diff = 0
     Lambda_term = 0
-    for ii in range(config.cogent_iters):
+    for ii in range(config.iters):
         for itr in range(config.local_iter):
             # atom_idx = np.random.choice(num_atoms, 1)[0]
             # atom = atoms[atom_idx]

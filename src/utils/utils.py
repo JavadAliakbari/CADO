@@ -104,7 +104,11 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
 
 
 def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
-    dimension, rho_minus, rho_plus, num_signal_features
+    dimension,
+    rho_minus,
+    rho_plus,
+    num_signal_features,
+    Q=None,
 ):
     """
     Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
@@ -125,11 +129,10 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
     # noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
     all_eigenvalues = np.concatenate((signal_eigenvalues, noise_eigenvalues))
 
+    if Q is None:
+        Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
+
     # Create rho_minus random orthogonal matrix Q using QR decomposition
-    # Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
-    idx = np.random.permutation(dimension)
-    Q = np.zeros((dimension, dimension), dtype=float)
-    Q[np.arange(dimension), idx] = 1
 
     # Construct the symmetric matrix using A = Q * Lambda * Q.T
     Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
@@ -430,8 +433,8 @@ def plot_results(
     plt.figure()
     plt.plot(f_values)
     plt.title("Loss")
-    if len(f_values) > 10:
-        plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
+    # if len(f_values) > 10:
+    #     plt.ylim(min(f_values[10:]) - 1, max(f_values[10:]) + 1)
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss.png")
@@ -498,7 +501,10 @@ def plot_results(
         plt.plot(Lambda_norms)
         plt.title("Lambda norms")
         plt.savefig(f"{save_path}Lambda_norms.png")
-        plot_adj(admm.Lambda, name="Lambda")
+        if isinstance(admm.Z, np.ndarray):
+            plot_adj(admm.Z, name="Lambda")
+        else:
+            plot_adj(admm.Z.L, name="Lambda")
 
 
 def save_model_params(atoms, coefs, graph, admm, save_path):
@@ -515,13 +521,13 @@ def save_model_params(atoms, coefs, graph, admm, save_path):
         pkl.dump(graph, fid)
 
     if admm is not None:
-        filename = f"{save_path}Lambda.pkl"
+        filename = f"{save_path}admm.pkl"
         with open(filename, "wb") as fid:
-            pkl.dump(admm.Lambda, fid)
+            pkl.dump(admm, fid)
 
-        filename = f"{save_path}Lp.pkl"
-        with open(filename, "wb") as fid:
-            pkl.dump(admm.Lp, fid)
+        # filename = f"{save_path}Lp.pkl"
+        # with open(filename, "wb") as fid:
+        #     pkl.dump(admm.Lp, fid)
 
 
 def project_atoms_sig(atoms, coefs, graph):

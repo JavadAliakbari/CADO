@@ -107,7 +107,8 @@ def k_subspaces(X, k, subspace_dim, n_iter=100):
     return clusters, subspaces, centers
 
 
-def visualize_high_dim_data(X, clusters, subspaces, centers, subspace_dim):
+def visualize_high_dim_data(X, clusters, subspaces, centers=None):
+    centers = centers or [np.zeros(X.shape[1]) for _ in range(len(subspaces))]
     """
     Visualize data (possibly high-dimensional) by projecting to 3 dimensions using PCA.
     Also projects the subspaces.
@@ -117,13 +118,14 @@ def visualize_high_dim_data(X, clusters, subspaces, centers, subspace_dim):
     X_3d = pca.fit_transform(X)
 
     # Project centers into 3D.
-    centers_3d = [pca.transform(center.reshape(1, -1))[0] for center in centers]
+    # centers_3d = [pca.transform(center.reshape(1, -1))[0] for center in centers]
 
     # For each subspace (assuming subspace_dim == 1 for a line),
     # generate points along the subspace in the original space and project them.
+    k = len(centers)
     t_vals = np.linspace(-3, 3, 100)
     subspace_lines_3d = []
-    for j in range(len(centers)):
+    for j in range(k):
         center = centers[j]
         basis = subspaces[j][:, 0]  # first basis vector for a line
         line_points = np.array([center + t * basis for t in t_vals])
@@ -135,7 +137,6 @@ def visualize_high_dim_data(X, clusters, subspaces, centers, subspace_dim):
     ax = fig.add_subplot(111, projection="3d")
 
     colors = ["r", "g", "b", "c", "m", "y", "k"]
-    k = len(centers)
     for j in range(k):
         idx = clusters == j
         ax.scatter(
@@ -211,7 +212,7 @@ if __name__ == "__main__":
     print("Adjusted Rand Index (ARI):", ari)
 
     # Visualize using PCA to project to 3 dimensions.
-    visualize_high_dim_data(X, true_labels, true_subspaces, true_centers, subspace_dim)
-    visualize_high_dim_data(X, clusters, subspaces, centers, subspace_dim)
+    visualize_high_dim_data(X, true_labels, true_subspaces, true_centers)
+    visualize_high_dim_data(X, clusters, subspaces, centers)
 
     plt.show()

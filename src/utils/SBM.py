@@ -2,6 +2,7 @@ import numpy as np
 import networkx as nx
 
 from utils.graph import Graph
+from subspace_clustring import generate_cluster_data
 from utils.utils import *
 
 
@@ -13,6 +14,8 @@ class SBM(Graph):
         num_features,
         num_signal_features,
         train_ratio=1,
+        rho_min=config.rho_min,
+        rho_max=config.rho_max,
     ) -> None:
         num_nodes = sum(block_sizes)
         super().__init__(num_nodes, train_ratio)
@@ -25,12 +28,14 @@ class SBM(Graph):
         self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
         self.L_opt, _, self.λ, self.E = self.create_partionioned_graph()
         self.b, self.pi, self.y = self.create_labels()
+        self.rho_min = rho_min
+        self.rho_max = rho_max
 
         self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)
-            - config.rho_min * np.eye(self.num_features)[None, :]
+            # - config.rho_min * np.eye(self.num_features)[None, :]
         )
 
     def create_partionioned_graph(self):
@@ -96,8 +101,8 @@ class SBM(Graph):
             [
                 create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
                     self.num_features,
-                    config.sig_rho_min,
-                    config.sig_rho_max,
+                    self.rho_min,
+                    self.rho_max,
                     self.num_signal_features,
                 )
                 for _ in range(self.num_clusters)
@@ -106,8 +111,9 @@ class SBM(Graph):
         )
 
         ## Calculate Rv based on the provided expression
-        Rv_matrices = np.einsum(
-            "ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices
+        Rv_matrices = (
+            np.einsum("ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices)
+            # + config.rho_min * np.eye(self.num_features)[None, :]
         )
 
         # Generate feature vectors X based on the multivariate normal distribution
@@ -121,6 +127,44 @@ class SBM(Graph):
         )
 
         return Ri_matrices, Rv_matrices, X
+
+    def create_features2(self):
+        sigma_signal = np.sqrt(self.sig_rho_max - self.sig_rho_min)
+        sigma_noise = np.sqrt(self.sig_rho_min)
+        node_per_cluster = self.num_nodes // self.num_clusters
+        Ris = []
+        Rvs = []
+        X_list = []
+        clusters = []
+        Q_list = []
+        for i in range(self.num_clusters):
+            X, Q = generate_cluster_data(
+                node_per_cluster,
+                self.num_features,
+                self.num_signal_features,
+                sigma_signal,
+                sigma_noise,
+            )
+            Ri = sigma_signal**2 * np.einsum("ij,kj->ik", Q, Q) + sigma_noise**2
+            Rv = np.einsum(
+                "i,jk->ijk",
+                np.ones(node_per_cluster),
+                Ri + config.rho_min * np.eye(self.num_features),
+            )
+
+            Ris.append(Ri)
+            Rvs.append(Rv)
+            X_list.append(X)
+            clusters.extend([i] * node_per_cluster)
+            Q_list.append(Q)
+
+        Ri_matrices = np.array(Ris)
+        Rv_matrices = np.stack(Rvs)
+        X = np.concatenate(X_list)
+        Q = np.array(Q_list)
+        clusters = np.array(clusters)
+
+        return (Ri_matrices, Rv_matrices, X)
 
     def create_labels(self):
         ## Generate the probability vector matrix b and generate matrix pi based on the provided expression

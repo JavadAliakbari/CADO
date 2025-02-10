@@ -4,6 +4,7 @@ import yaml
 class Config:
     def __init__(self, path="config/config.yml"):
         self.config = Config.load_config(path)
+        self.mu0 = self.config["mu0"]
         self.mu1 = self.config["mu1"]
         self.mu2 = self.config["mu2"]
         self.iner_iter_GA_R = self.config["iner_iter_GA_R"]
@@ -15,7 +16,7 @@ class Config:
         self.rho_max = self.config["rho_max"]
         self.sig_rho_min = self.config["sig_rho_min"]
         self.sig_rho_max = self.config["sig_rho_max"]
-        self.cogent_iters = self.config["cogent_iters"]
+        self.iters = self.config["cogent_iters"]
         self.GP_iters = self.config["GP_iters"]
         self.GP_tol = self.config["GP_tol"]
         self.beta = self.config["beta"]
@@ -28,6 +29,7 @@ class Config:
         self.q = self.config["q"]
         self.CGD = self.config["CGD"]
         self.warm_start = self.config["warm_start"]
+        self.normalize = self.config["normalize"]
 
     def load_config(path):
         with open(path) as f:

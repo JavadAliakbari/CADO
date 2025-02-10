@@ -13,14 +13,14 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 
-def soft_thresholdinhg(graph: Graph, L, lr=0.01, mu=1):
+def soft_thresholdinhg(A, L, lr=0.01, mu=1):
     """
     Soft thresholding algorithm
     """
     if config.Abar:
-        Lp = L + lr * graph.Abar
+        Lp = L + lr * A
     else:
-        Lp = L + lr * (graph.A - L)
+        Lp = L + lr * (A - L)
     D, E = np.linalg.eigh(Lp)
     D = np.maximum(D - mu * lr, 0)
     L_new = E @ np.diag(D) @ E.T
