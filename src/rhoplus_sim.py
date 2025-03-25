@@ -20,20 +20,18 @@ np.set_printoptions(threshold=np.inf, suppress=False)
 def process_task(args):
     # print("start")
     (
-        ind,
         total,
-        noisy_sigs,
         c,
+        num_features,
         rho_plus,
         samples_per_cluster,
         num_signal_features,
         config,
     ) = args
-    num_features = noisy_sigs[0].Rv.shape[1]
     probs = np.full((c, c), config.q)
     np.fill_diagonal(probs, config.p)
-    # config.sig_rho_max = rho_plus * config.sig_rho_min
-    config.rho_max = rho_plus * config.rho_min
+    config.sig_rho_max = rho_plus * config.sig_rho_min
+    # config.rho_max = rho_plus * config.rho_min
 
     f_vals = []
     f_opts = []
@@ -45,9 +43,9 @@ def process_task(args):
                 probs,
                 num_features,
                 num_signal_features,
-                train_ratio=0.5,
-                rho_min=config.rho_min,
-                rho_max=config.rho_max,
+                train_ratio=config.train_ratio,
+                rho_min=config.sig_rho_min,
+                rho_max=config.sig_rho_max,
             )
             opt_atoms, opt_coefs = create_optimal_atoms(graph)
             opt_sig = opt_atoms.calc_sig(opt_coefs)
@@ -82,8 +80,8 @@ def process_task(args):
 
 def parallel_processing(
     total,
-    noisy_sigs,
     c,
+    num_features,
     rho_plus_range,
     samples_per_cluster,
     num_signal_features,
@@ -92,22 +90,21 @@ def parallel_processing(
     num_workers = 6  # Adjust the number of workers as needed
     args = [
         (
-            i,
             total,
-            noisy_sigs,
             c,
+            num_features,
             rho_plus,
             samples_per_cluster,
             num_signal_features,
             config,
         )
-        for i, rho_plus in enumerate(rho_plus_range)
+        for rho_plus in rho_plus_range
     ]
 
     results = []
     with Manager() as manager:
         with Pool(num_workers) as pool:
-            with tqdm(total=len(args)) as pbar:
+            with tqdm(total=len(args), leave=False) as pbar:
                 for result in pool.imap(process_task, args):
                     results.append(result)
                     # Update tqdm with additional information
@@ -117,17 +114,17 @@ def parallel_processing(
     return results
 
 
-def change_rho_plus(ax_f, ax_acc, rho_plus_range):
+def change_rho_plus(ax_f, ax_acc, rho_plus_range, results_path):
     results = parallel_processing(
         total,
-        noisy_sigs,
         c,
+        num_features,
         rho_plus_range,
         samples_per_cluster,
         num_signal_features,
         config,
     )
-    pd.DataFrame(results).to_csv(f"{save_path}results_rhoplus.csv")
+    pd.DataFrame(results).to_csv(f"{results_path}results_rhoplus.csv")
 
     # Save results
     # plt.figure()
@@ -165,46 +162,47 @@ def change_rho_plus(ax_f, ax_acc, rho_plus_range):
         rho_plus_range,
         [result["accuracy"] for result in results],
         "-*",
-        # label=f"Accuracy for $\\rho^+$={u1} and u2={u2}",
+        label=f"Accuracy",
     )
-    ax_acc.set_xlabel("$\\rho^+$")
+    ax_f.set_xlabel("$\\frac{\\rho^+}{\\rho^-}$")
     ax_acc.set_ylabel("Accuracy")
     ax_acc.set_title("Accuracy")
     ax_acc.legend()
 
 
+def change_rho_min(rho_min):
+    config.sig_rho_min = rho_min
+    results_path = f"{save_path}rhomin({rho_min:0.1f})/"
+    os.makedirs(results_path, exist_ok=True)
+
+    fig_f, ax_f = plt.subplots()
+    fig_acc, ax_acc = plt.subplots()
+    rho_plus_range = np.arange(1, 10.5, 0.5)
+    change_rho_plus(ax_f, ax_acc, rho_plus_range, results_path)
+
+    fig_f.savefig(f"{results_path}results.png")
+    fig_acc.savefig(f"{results_path}accuracy.png")
+
+
 if __name__ == "__main__":
     # Example usage
-    total = 4000
+    total = 100000
     c = 3
     # num_signal_features = 10
     num_features = 10  # Dimension of the features at each node
     num_signal_features = 2
-    samples_per_cluster = [25] * 3  # Number of training samples in each cluster
+    samples_per_cluster = [20] * 3  # Number of training samples in each cluster
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     num_atoms = c
-    config.mu1 = 0.1
+    config.mu1 = 0.05
     config.mu2 = 1
-    config.p = 0.2
-    config.q = 0.55
-    config.train_ratio = 0.2
-    config.rho_min = 0.5
-    config.sig_rho_min = 0.5
-    config.sig_rho_max = 5 * config.sig_rho_min
+    config.p = 0.1
+    config.q = 0.50
+    config.train_ratio = 0.1
+    config.rho_min = 0.2
+    config.rho_max = 1
 
-    os.makedirs(save_path, exist_ok=True)
-    noisy_sigs = []
-    for i in range(total):
-        atoms, coefs = create_random_atoms(n, num_features, c, num_atoms)
-        noisy_sig = atoms.calc_sig(coefs)
-        noisy_sig.L = project_to_bound(noisy_sig.L)
-        noisy_sigs.append(noisy_sig)
-
-    fig_f, ax_f = plt.subplots()
-    fig_acc, ax_acc = plt.subplots()
-    rho_plus_range = np.arange(1, 5, 0.1)
-    change_rho_plus(ax_f, ax_acc, rho_plus_range)
-
-    fig_f.savefig(f"{save_path}results.png")
-    fig_acc.savefig(f"{save_path}accuracy.png")
+    rho_min_range = np.arange(0.1, 1.1, 0.1)
+    for rho_min in tqdm(rho_min_range):
+        change_rho_min(rho_min)

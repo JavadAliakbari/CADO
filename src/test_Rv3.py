@@ -58,7 +58,7 @@ def create_random_R(n, d, c, num_atoms):
 
     for _ in range(num_atoms):
         R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-            d, 0, config.rho_max - config.rho_min
+            d, config.rho_min, config.rho_max
         )
         atoms.append(R)
 
@@ -85,8 +85,8 @@ def conditional_gradient_descent(
             S, U = np.linalg.eigh(grad_Ri)
 
             mask1 = S < 0
-            S[mask1] = config.rho_max - config.rho_min
-            S[~mask1] = 0
+            S[mask1] = config.rho_max
+            S[~mask1] = config.rho_min
             Ri = U @ np.diag(S) @ U.T
             atoms[ind] = Ri
 

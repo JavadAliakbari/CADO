@@ -97,8 +97,8 @@ if __name__ == "__main__":
                 Lambda_norms,
                 epsilsons,
                 components,
-            ) = CANO2(graph, atoms, coefs, admm, log_results=False)
-            # ) = CANO(graph)
+                # ) = CANO2(graph, atoms, coefs, admm, log_results=False)
+            ) = CANO(graph)
             # ) = CANO(graph, atoms, coefs, admm)
 
             log_results(atoms, coefs, graph, results, save_path)

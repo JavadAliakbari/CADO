@@ -68,7 +68,7 @@ def process_task(args):
 def parallel_processing(
     total, noisy_sigs, c, q_vals, samples_per_cluster, num_signal_features, config
 ):
-    num_workers = 6  # Adjust the number of workers as needed
+    num_workers = 4  # Adjust the number of workers as needed
     args = [
         (i, total, noisy_sigs, c, q, samples_per_cluster, num_signal_features, config)
         for i, q in enumerate(q_vals)
@@ -87,13 +87,12 @@ def parallel_processing(
     return results
 
 
-def change_mu(u1, u2, ax_f, ax_acc):
+def change_mu(noisy_sig, u1, u2, ax_f, ax_acc):
     config.mu1 = u1
     config.mu2 = u2
     results = parallel_processing(
-        total, noisy_sigs, c, q_vals, samples_per_cluster, num_signal_features, config
+        total, noisy_sig, c, q_vals, samples_per_cluster, num_signal_features, config
     )
-    pd.DataFrame(results).to_csv(f"{save_path}results_u0({u1})_u1({u2}).csv")
 
     # Save results
     # plt.figure()
@@ -138,6 +137,34 @@ def change_mu(u1, u2, ax_f, ax_acc):
     ax_acc.set_title("Accuracy")
     ax_acc.legend()
 
+    return results
+
+
+def change_num_atoms(num_atoms):
+    results_path = f"{save_path}num_atoms({num_atoms})/"
+    os.makedirs(results_path, exist_ok=True)
+    noisy_sigs = []
+    for i in range(total):
+        atoms, coefs = create_random_atoms(n, num_features, c, num_atoms)
+        noisy_sig = atoms.calc_sig(coefs)
+        noisy_sig.L = project_to_bound(noisy_sig.L)
+        noisy_sigs.append(noisy_sig)
+
+    fig_f, ax_f = plt.subplots()
+    fig_acc, ax_acc = plt.subplots()
+    u1_vals = [0.05, 0.0]
+    for u1 in u1_vals:
+        if u1 == 0:
+            u2_vals = [0, 1]
+        else:
+            u2_vals = [1]
+        for u2 in u2_vals:
+            results = change_mu(noisy_sigs, u1, u2, ax_f, ax_acc)
+            pd.DataFrame(results).to_csv(f"{results_path}results_u0({u1})_u1({u2}).csv")
+
+    fig_f.savefig(f"{results_path}results.png")
+    fig_acc.savefig(f"{results_path}accuracy.png")
+
 
 if __name__ == "__main__":
     # Example usage
@@ -149,27 +176,7 @@ if __name__ == "__main__":
     samples_per_cluster = [50] * 3  # Number of training samples in each cluster
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
-    num_atoms = c
     q_vals = np.arange(0.0, 1, 0.02)
 
-    os.makedirs(save_path, exist_ok=True)
-    noisy_sigs = []
-    for i in range(total):
-        atoms, coefs = create_random_atoms(n, num_features, c, num_atoms)
-        noisy_sig = atoms.calc_sig(coefs)
-        noisy_sig.L = project_to_bound(noisy_sig.L)
-        noisy_sigs.append(noisy_sig)
-
-    fig_f, ax_f = plt.subplots()
-    fig_acc, ax_acc = plt.subplots()
-    u1_vals = [0, 0.1]
-    for u1 in u1_vals:
-        if u1 == 0:
-            u2_vals = [0, 1]
-        else:
-            u2_vals = [1]
-        for u2 in u2_vals:
-            change_mu(u1, u2, ax_f, ax_acc)
-
-    fig_f.savefig(f"{save_path}results.png")
-    fig_acc.savefig(f"{save_path}accuracy.png")
+    for num_atoms in range(1, 7):
+        change_num_atoms(num_atoms)

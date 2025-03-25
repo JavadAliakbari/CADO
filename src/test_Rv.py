@@ -83,7 +83,7 @@ def proximal_conditional_descent(
             grad_Ri = np.einsum("ijk,i->jk", grad_R, coefs[:, ind])
             atoms[ind] -= 2 * config.lr * grad_Ri  # Update atom
             atoms[ind] = project_to_psd_cone(
-                atoms[ind], 0, config.rho_max - config.rho_min
+                atoms[ind], config.rho_min, config.rho_max
             )
         if iter % 10 == 0:
             coefs = update_coefs(atoms, f, coefs, 0.01, 1)
