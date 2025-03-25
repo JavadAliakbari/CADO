@@ -60,8 +60,8 @@ class GraphFunc(f):
             term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / normalizer
 
             # term3
-            term_3 = np.sum(np.log(np.linalg.det(signal.Rv))) / normalizer
-            # term_3 = np.trace(np.sum(signal.Rv, axis=0)) / signal.d
+            # term_3 = np.sum(np.log(np.linalg.det(signal.Rv))) / normalizer
+            term_3 = np.trace(np.sum(signal.Rv, axis=0)) / normalizer
         else:
             term_2 = 0
             term_3 = 0

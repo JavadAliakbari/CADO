@@ -47,7 +47,7 @@ class Atoms:
             [c * atom.calc_sig_term() for atom, c in zip(self.atoms, coefs.get_coefs())]
         )
 
-        sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
+        # sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
 
         return sig
     

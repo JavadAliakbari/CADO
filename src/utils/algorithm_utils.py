@@ -231,8 +231,8 @@ def update_R(grad: GraphSig, atom: GraphAtom, iter, itr=0):
         plt.close()
 
     mask1 = S < 0
-    S[mask1] = config.rho_max - config.rho_min
-    S[~mask1] = 0
+    S[mask1] = config.rho_max
+    S[~mask1] = config.rho_min
     R = U @ np.diag(S) @ U.T
 
     return R

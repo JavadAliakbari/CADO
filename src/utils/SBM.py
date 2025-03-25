@@ -129,8 +129,8 @@ class SBM(Graph):
         return Ri_matrices, Rv_matrices, X
 
     def create_features2(self):
-        sigma_signal = np.sqrt(self.sig_rho_max - self.sig_rho_min)
-        sigma_noise = np.sqrt(self.sig_rho_min)
+        sigma_signal = np.sqrt(self.rho_max - self.rho_min)
+        sigma_noise = np.sqrt(self.rho_min)
         node_per_cluster = self.num_nodes // self.num_clusters
         Ris = []
         Rvs = []

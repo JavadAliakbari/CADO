@@ -27,7 +27,7 @@ class PerfectGraph(Graph):
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)
-            - config.rho_min * np.eye(self.num_features)[None, :]
+            # - config.rho_min * np.eye(self.num_features)[None, :]
         )
 
     def create_adjacancy__matrix(self):

@@ -28,8 +28,8 @@ class GraphAtom(Atom):
         self.h = np.random.uniform(0, 1, self.n)
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
             self.d,
-            0,
-            config.rho_max - config.rho_min,
+            config.rho_min,
+            config.rho_max,
             noise_level=0.0,
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
@@ -214,8 +214,8 @@ class GraphAtom(Atom):
             plt.close()
 
         mask1 = S < 0
-        S[mask1] = config.rho_max - config.rho_min
-        S[~mask1] = 0
+        S[mask1] = config.rho_max
+        S[~mask1] = config.rho_min
         self.R = U @ np.diag(S) @ U.T
 
     ## Step 3: Fix epsilon and R, update b (closed-form solution)

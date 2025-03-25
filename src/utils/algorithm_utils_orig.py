@@ -229,11 +229,12 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM)
     return coefs
 
 
-def Enhancemnet_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
-    alpha = 0.01
+def Enhancemnet_step2(
+    atoms: Atoms, f: GraphFunc, coefs: Coefs, iters=config.GP_iters, lr=config.lr
+):
     stop_flag = False
     iter = 0
-    while not stop_flag and iter < config.GP_iters:
+    while not stop_flag and iter < iters:
         sig = atoms.calc_sig(coefs)
         grad = f.calc_grad(sig)
         g = np.array(
@@ -242,7 +243,7 @@ def Enhancemnet_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
 
         # Projection onto the simplex
         c = coefs.get_coefs()
-        c_new = project_to_simplex(c - alpha * g, config.tau)
+        c_new = project_to_simplex(c - lr * g, config.tau)
         # c_new = c - alpha * g
         coefs.update_coefficients(c_new)
 
@@ -362,11 +363,12 @@ def create_sig(E, R, b, λ):
     coefs = Coefs()
 
     for i in range(b.shape[1]):
+        
         atom0 = GraphAtom()
         S, U = np.linalg.eigh(R[i])
         mask = S >= config.sig_rho_max - 0.0000001
-        S[mask] = config.rho_max - config.rho_min
-        S[~mask] = 0
+        S[mask] = config.rho_max
+        S[~mask] = config.rho_min
 
         RR = U @ np.diag(S) @ U.T
         atom0.set_params(E[:, i], RR, b[i])
@@ -395,19 +397,27 @@ def create_optimal_atoms(graph: Graph):
     coefs = Coefs()
     E = graph.E
     # E[np.abs(E) < 0.00001] = 0.00001
-    R = graph.Ri_matrices
-    b = graph.b
+    # R = graph.Ri_matrices
+    # b = graph.b
     c = graph.num_classes
+    Rv = graph.cov
+    n = graph.num_nodes
 
     for i in range(c):
         atom0 = GraphAtom()
-        S, U = np.linalg.eigh(R[i])
-        mask = S >= config.sig_rho_max - 0.0000001
-        S[mask] = config.rho_max - config.rho_min
-        S[~mask] = 0
+        # RR = project_to_psd_cone(R[i], config.rho_min, config.rho_max)
+        e = E[:, i]
+        RR = np.einsum("ijk,i->jk", Rv, e**2)
+        RR = project_to_psd_cone(RR, config.rho_min, config.rho_max)
 
-        RR = U @ np.diag(S) @ U.T
-        atom0.set_params(E[:, i], RR, b[i])
+        b = np.zeros((n, graph.num_clusters))
+        node_ids = np.arange(n)
+        b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
+        a = np.einsum("i, ij-> j", e**2, b)
+        b = np.zeros(graph.num_classes, dtype=float)
+        b[np.argmax(a)] = 1
+
+        atom0.set_params(e, RR, b)
         atoms.add_atom(atom0)
         coefs.add_coef(graph.λ[i])
     return atoms, coefs
@@ -436,15 +446,15 @@ def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
     atoms = Atoms()
     coefs = Coefs()
     n = graph.num_nodes
+    Rv = graph.cov
     for i in range(graph.num_clusters):
         atom = GraphAtom()
-        atom.initialize(graph.num_nodes, graph.num_features, graph.num_clusters)
+        # atom.initialize(graph.num_nodes, graph.num_features, graph.num_clusters)
         mask = cluster_labels == i
         coef = np.sum(mask)
         atom.e = np.zeros(n)
         atom.e[mask] = 1
         atom.e /= np.linalg.norm(atom.e)
-        Rv = graph.cov
         atom.R = np.einsum("ijk,i->jk", Rv, atom.e**2)
         atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
 

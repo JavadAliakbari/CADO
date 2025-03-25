@@ -10,6 +10,14 @@ from utils.utils import *
 class GraphAtom(Atom):
     def __init__(self) -> None:
         super().__init__()
+        # For Adam optimizer
+        self.m_e = None  # First moment estimate for e
+        self.v_e = None  # Second moment estimate for e
+        self.m_R = None  # First moment estimate for R
+        self.v_R = None  # Second moment estimate for R
+        self.m_b = None  # First moment estimate for b
+        self.v_b = None  # Second moment estimate for b
+        self.t = 0  # Time step
 
     def set_params(self, e, R, b) -> None:
         self.e = e
@@ -34,8 +42,8 @@ class GraphAtom(Atom):
         self.e /= np.linalg.norm(self.e)
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
             self.d,
-            0,
-            config.rho_max - config.rho_min,
+            config.rho_min,
+            config.rho_max,
             noise_level=0.0,
         )
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
@@ -83,13 +91,13 @@ class GraphAtom(Atom):
         return grad
 
     def calc_grad_ei(self, grad_sig: GraphSig):
-        scale_factor = (config.rho_max / config.rho_min) ** 2
+        # scale_factor = (config.rho_max / config.rho_min) ** 2
         if self.R is not None:
             tmp1 = np.einsum("ijk,jk->i", grad_sig.Rv, self.R)
         else:
             tmp1 = 0
 
-        tmp1 /= scale_factor
+        # tmp1 /= scale_factor
         tmp2 = np.einsum("ij,j->i", grad_sig.pi, self.b)
         tmp3 = grad_sig.L + np.diag(tmp1 + tmp2)
 
@@ -107,17 +115,68 @@ class GraphAtom(Atom):
 
         return grad_bi
 
-    def update(self, grad, lr):
-        self.e -= lr * grad.e
-        self.R -= lr * grad.R
-        self.b -= lr * grad.b
+    def update(self, grad, lr, use_adam=True, beta1=0.9, beta2=0.9999, epsilon=1e-10):
+        if use_adam:
+            # Increment time step
+            self.t += 1
+
+            # Initialize moment estimates if they don't exist
+            if self.m_e is None:
+                self.m_e = np.zeros_like(self.e)
+                self.v_e = np.zeros_like(self.e)
+            if self.m_R is None:
+                self.m_R = np.zeros_like(self.R)
+                self.v_R = np.zeros_like(self.R)
+            if self.m_b is None:
+                self.m_b = np.zeros_like(self.b)
+                self.v_b = np.zeros_like(self.b)
+
+            # Update biased first moment estimate
+            self.m_e = beta1 * self.m_e + (1 - beta1) * grad.e
+            self.m_R = beta1 * self.m_R + (1 - beta1) * grad.R
+            self.m_b = beta1 * self.m_b + (1 - beta1) * grad.b
+
+            # Update biased second raw moment estimate
+            self.v_e = beta2 * self.v_e + (1 - beta2) * (grad.e**2)
+            self.v_R = beta2 * self.v_R + (1 - beta2) * (grad.R**2)
+            self.v_b = beta2 * self.v_b + (1 - beta2) * (grad.b**2)
+
+            # Compute bias-corrected first moment estimate
+            m_e_hat = self.m_e / (1 - beta1**self.t)
+            m_R_hat = self.m_R / (1 - beta1**self.t)
+            m_b_hat = self.m_b / (1 - beta1**self.t)
+
+            # Compute bias-corrected second raw moment estimate
+            v_e_hat = self.v_e / (1 - beta2**self.t)
+            v_R_hat = self.v_R / (1 - beta2**self.t)
+            v_b_hat = self.v_b / (1 - beta2**self.t)
+
+            # Update parameters
+            self.e -= lr * m_e_hat / (np.sqrt(v_e_hat) + epsilon)
+            self.R -= lr * m_R_hat / (np.sqrt(v_R_hat) + epsilon)
+            self.b -= lr * m_b_hat / (np.sqrt(v_b_hat) + epsilon)
+        else:
+            # Original gradient descent update
+            self.e -= lr * grad.e
+            self.R -= lr * grad.R
+            self.b -= lr * grad.b
 
         self.project_to_bound()
 
     def project_to_bound(self):
         self.e = project_to_unit_vector(self.e)
-        self.R = project_to_psd_cone(self.R, 0, config.rho_max - config.rho_min)
+        self.R = project_to_psd_cone(self.R, config.rho_min, config.rho_max)
         self.b = project_to_simplex(self.b, 1)
+
+    def reset_optimizer_state(self):
+        """Reset the Adam optimizer state"""
+        self.m_e = None
+        self.v_e = None
+        self.m_R = None
+        self.v_R = None
+        self.m_b = None
+        self.v_b = None
+        self.t = 0
 
     def __str__(self):
         return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
@@ -133,7 +192,7 @@ class GraphAtom(Atom):
 
         if config.mu1 != 0:
             self.Ri = (np.einsum("ijk,i->jk", sig.Rv, self.e**2)) / λ
-            self.Ri = project_to_psd_cone(self.Ri, 0, config.rho_max - config.rho_min)
+            self.Ri = project_to_psd_cone(self.Ri, config.rho_min, config.rho_max)
 
         if config.mu2 != 0:
             self.b = np.einsum("i, ij-> j", self.e**2, sig.pi) / λ
@@ -240,8 +299,8 @@ class GraphAtom(Atom):
             plt.close()
 
         mask1 = S < 0
-        S[mask1] = config.rho_max - config.rho_min
-        S[~mask1] = 0
+        S[mask1] = config.rho_max
+        S[~mask1] = config.rho_min
         self.R = U @ np.diag(S) @ U.T
 
     ## Step 3: Fix epsilon and R, update b (closed-form solution)

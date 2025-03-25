@@ -421,12 +421,12 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
 def plot_results(
     f_values,
     accuracies,
-    Lambda_norms,
     atoms,
     epsilons,
     components,
     admm,
     save_path,
+    Lambda_norms=None,
     f_opt=None,
 ):
     os.makedirs(save_path, exist_ok=True)
@@ -459,10 +459,11 @@ def plot_results(
     plt.plot(accuracies)
     plt.title("Accuracy")
     plt.savefig(f"{save_path}accuracies.png")
-    plt.figure()
-    plt.plot(Lambda_norms)
-    plt.title("Lambda norms")
-    plt.savefig(f"{save_path}Lambda_norms.png")
+    if Lambda_norms is not None:
+        plt.figure()
+        plt.plot(Lambda_norms)
+        plt.title("Lambda norms")
+        plt.savefig(f"{save_path}Lambda_norms.png")
 
     plt.figure()
     for id, atom in enumerate(atoms):
@@ -482,7 +483,7 @@ def plot_results(
         for id, e in enumerate(epsilons[frame]):
             ax.plot(e, "*", label=f"atom {id}")
         ax.legend()
-        ax.set_title(f"Eigenvectors_{frame}")
+        ax.set_title(f"Eigenvectors_{frame} acc: {accuracies[frame]:.2f}")
         ax.set_ylim(min_e, max_e)
 
     # Reduce the number of frames by skipping some
