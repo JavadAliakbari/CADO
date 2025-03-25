@@ -4,17 +4,18 @@ import sys
 import numpy as np
 from tqdm import tqdm
 
-from Neurips.idea1 import CANO
+from Neurips.idea2 import CANO
 from load_atom import load_atom
 from utils.algorithm_utils_orig import *
 from utils.SBM import SBM
 from utils.utils import *
+from sklearn.metrics import adjusted_rand_score
 
 # Set print options to show the entire array
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [150, 100, 75]  # Number of training samples in each cluster
+    samples_per_cluster = [100, 100, 100]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
     num_signal_features = 2
     n = sum(samples_per_cluster)
@@ -38,6 +39,7 @@ if __name__ == "__main__":
     # Run spectral clustering
     n_clusters = c  # Number of clusters
     cluster_labels = run_spectral_clustering(graph, n_clusters)
+    ari = adjusted_rand_score(graph.y, cluster_labels)
     plt.figure()
     plt.plot(cluster_labels)
     plt.title("Cluster labels")
@@ -69,7 +71,8 @@ if __name__ == "__main__":
         components,
     ) = CANO(graph, atoms, coefs, log_results=False)
 
-    log_results(atoms, coefs, graph, results, save_path)
+    LOGGER = log_results(atoms, coefs, graph, results, save_path)
+    LOGGER.info(f"ARI: {ari}")
     plot_results(
         f_values,
         accuracies,

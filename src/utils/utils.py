@@ -416,6 +416,7 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     else:
         acc = 0
     LOGGER.info(acc)
+    return LOGGER
 
 
 def plot_results(

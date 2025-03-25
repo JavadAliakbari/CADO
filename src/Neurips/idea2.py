@@ -7,13 +7,13 @@ from utils.utils import *
 
 
 def map_to_simplex(atoms: Atoms, coefs: Coefs, grads=None, g=None, lr=None):
-    s = np.array([np.sign(atom.e) for atom in atoms]).T
+    # s = np.array([np.sign(atom.e) for atom in atoms]).T
     Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
     if grads is not None:
         grad_Piv = np.array(
             [
-                2 * coef * grad_atom.e**2
-                for grad_c, grad_atom, coef in zip(g, grads, coefs)
+                2 * coef * grad_atom.e**2 + 2 * grad_c * atom.e**2
+                for grad_c, grad_atom, coef, atom in zip(g, grads, coefs, atoms)
             ]
         ).T
         dd = np.mean(grad_Piv, axis=1)
@@ -24,8 +24,8 @@ def map_to_simplex(atoms: Atoms, coefs: Coefs, grads=None, g=None, lr=None):
     c = np.sum(Piv, axis=0)
     coefs.update_coefficients(c)
     E2 = Piv / (c[None, :] + 1e-10)
-    # E = np.sqrt(E2)
-    E = s * np.sqrt(E2)
+    E = np.sqrt(E2)
+    # E = s * np.sqrt(E2)
     for atom_idx, atom in enumerate(atoms):
         atom.e = E[:, atom_idx]
         if grads is not None:

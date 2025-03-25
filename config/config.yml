@@ -1,9 +1,9 @@
 mu0: 15
-mu1: 0.0
-mu2: 0.2
+mu1: 0.01
+mu2: 0.5
 beta: 0.1
 local_iter: 1
-cogent_iters: 2500
+cogent_iters: 4500
 iter_or_cycles_to_find_next_atom: 30
 rho_min: 0.5                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
@@ -14,10 +14,25 @@ GP_tol: 0.000001
 iner_iter_GA_R: 10000
 iner_step_GA_R: 0.01
 Abar: True
-train_ratio: 0.2
-lr: 0.00001
-p: 0.6
+train_ratio: 0.5
+lr: 0.01
+p: 0.15
 q: 0.05
 CGD: False
 warm_start: "random"                  # "optimal" or "random" or "cluster"
 normalize: True
+
+# Optimizer configuration
+optimizer:
+  type: "adam"  # Options: "adam", "sgd"
+  learning_rate:
+    initial: 0.01  # Initial learning rate
+    min: 0.0001    # Minimum learning rate
+    decay_rate: 0.95  # Decay rate for learning rate scheduling
+    decay_steps: 100   # Number of steps between learning rate updates
+  adam:
+    beta1: 0.9     # Exponential decay rate for first moment estimates
+    beta2: 0.999   # Exponential decay rate for second moment estimates
+    epsilon: 0.00000001  # Small constant to prevent division by zero
+  sgd:
+    momentum: 0.9  # Momentum factor for SGD

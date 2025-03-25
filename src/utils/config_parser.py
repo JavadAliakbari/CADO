@@ -30,6 +30,37 @@ class Config:
         self.warm_start = self.config["warm_start"]
         self.normalize = self.config["normalize"]
 
+        # Load optimizer configurations
+        self.optimizer = self._load_optimizer_config()
+
+    def _load_optimizer_config(self):
+        """Load optimizer configuration from the config file"""
+        optimizer_config = self.config.get("optimizer", {})
+
+        # Default values if not specified in config
+        default_optimizer = {
+            "type": "adam",
+            "learning_rate": {
+                "initial": self.lr,  # Use global lr as default
+                "min": self.lr * 0.01,
+                "decay_rate": 0.95,
+                "decay_steps": 100,
+            },
+            "adam": {"beta1": 0.9, "beta2": 0.999, "epsilon": 1e-8},
+            "sgd": {"momentum": 0.0},
+        }
+
+        # Update defaults with values from config
+        for key, value in optimizer_config.items():
+            if key in default_optimizer:
+                if isinstance(default_optimizer[key], dict) and isinstance(value, dict):
+                    default_optimizer[key].update(value)
+                else:
+                    default_optimizer[key] = value
+
+        return default_optimizer
+
+    @staticmethod
     def load_config(path):
         with open(path) as f:
             config = yaml.load(f, yaml.FullLoader)
