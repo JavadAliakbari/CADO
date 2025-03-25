@@ -22,7 +22,7 @@ def map_to_simplex(atoms: Atoms, coefs: Coefs):
     return atoms, coefs
 
 
-def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
+def CANO(graph, atoms=None, coefs=None, log_results=True):
     n = graph.num_nodes
     num_features = graph.num_features
     c = graph.num_clusters
@@ -31,17 +31,14 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
-    # coefs = coefs_opt
-    # atoms = atoms_opt
 
     atoms, coefs = map_to_simplex(atoms, coefs)
     sig = atoms.calc_sig(coefs)
     opt_sig = atoms_opt.calc_sig(coefs_opt)
-    # sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
     f_opt = f(opt_sig)
 
-    f_sig = f(sig, ADMM=False)
+    f_sig = f(sig)
 
     # if log_results:
     bar = tqdm(total=config.iters, leave=False)
@@ -71,7 +68,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
                 atoms, coefs = map_to_simplex(atoms, coefs)
 
         sig = atoms.calc_sig(coefs)
-        f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
+        f_sig, L_term, R_term, pi_term = f(sig, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
@@ -84,7 +81,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
             "f_opt": f"{f_opt:,.4f}",
-            # "beta": config.beta,
         }
 
         # if log_results:
@@ -93,7 +89,7 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         f_values.append(f_sig)
         accuracies.append(acc)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
-        components.append([L_term, R_term, pi_term, ADMM_term])
+        components.append([L_term, R_term, pi_term])
 
     atoms, coefs = map_to_simplex(atoms, coefs)
 
@@ -105,7 +101,6 @@ def CANO(graph, atoms=None, coefs=None, admm=None, log_results=True):
         f_values,
         accuracies,
         f_opt,
-        admm,
         epsilsons,
         components,
     )

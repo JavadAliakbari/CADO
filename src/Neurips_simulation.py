@@ -5,7 +5,6 @@ import numpy as np
 from tqdm import tqdm
 
 from Neurips.idea1 import CANO
-from Graph_Atom.ADMM import ADMM_cls
 from load_atom import load_atom
 from utils.algorithm_utils_orig import *
 from utils.SBM import SBM
@@ -44,7 +43,6 @@ if __name__ == "__main__":
     plt.title("Cluster labels")
     plt.savefig(f"{save_path}/cluster_labels.png")
 
-    admm = None
     if config.warm_start == "random":
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     elif config.warm_start == "optimal":
@@ -53,9 +51,7 @@ if __name__ == "__main__":
         atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
     elif config.warm_start == "load":
         path = "results/20250203_004544/"
-        atoms, coefs, graph, Lp, Lambda = load_atom(path)
-        admm = ADMM_cls(Lp, project_to_bound)
-        admm.Z = Lambda
+        atoms, coefs, graph = load_atom(path)
 
     sig = atoms.calc_sig(coefs)
     f = GraphFunc(graph=graph)
@@ -69,10 +65,9 @@ if __name__ == "__main__":
         f_values,
         accuracies,
         f_opt,
-        admm,
         epsilsons,
         components,
-    ) = CANO(graph, atoms, coefs, admm, log_results=False)
+    ) = CANO(graph, atoms, coefs, log_results=False)
 
     log_results(atoms, coefs, graph, results, save_path)
     plot_results(
@@ -81,8 +76,7 @@ if __name__ == "__main__":
         atoms,
         epsilsons,
         components,
-        admm,
         save_path,
         f_opt=f_opt,
     )
-    save_model_params(atoms, coefs, graph, admm, save_path)
+    save_model_params(atoms, coefs, graph, save_path)

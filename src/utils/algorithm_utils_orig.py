@@ -90,12 +90,12 @@ def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs) -> int:
         c_new = project_to_simplex(new_coefs, config.tau)
         new_coefs = Coefs(c_new)
         if config.enhance:
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, ADMM=True)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
         residual_sig = new_atoms.calc_sig(new_coefs)
         # single_sig = atoms[idx].calc_sig_term()
         # single_sig = coefs[idx] * single_sig
         # residual_sig = sig - single_sig
-        val = f(residual_sig, ADMM=True)
+        val = f(residual_sig)
 
         if val < min_val:
             min_val = val
@@ -162,7 +162,7 @@ def update_coefs(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, lr, itr):
     return atoms, coefs
 
 
-def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM):
+def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
     """
     Perform the enhancement step for the given coefficients.
 
@@ -187,8 +187,8 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM)
 
     alpha_min, alpha_red, c1 = 0.01, 0.5, 1e-3
     sig = atoms.calc_sig(coefs)
-    f_val = f(sig, ADMM=ADMM)
-    grad = f.calc_grad(sig, ADMM=ADMM)
+    f_val = f(sig)
+    grad = f.calc_grad(sig)
 
     for _ in range(config.GP_iters):
         g = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
@@ -209,7 +209,7 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM)
                 stop_flag = True
 
             new_sig = atoms.calc_sig(new_coefs)
-            f_new = f(new_sig, ADMM=ADMM)
+            f_new = f(new_sig)
 
             if f_new <= f_val + c1 * grad_diff:
                 break
@@ -223,7 +223,7 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, ADMM=config.ADMM)
         coefs = new_coefs
         sig = new_sig
         f_val = f_new
-        grad = f.calc_grad(sig, ADMM=ADMM)
+        grad = f.calc_grad(sig)
 
     # print("3")
     return coefs
@@ -283,41 +283,14 @@ def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
         if len(new_coefs) > 0:
             new_c = project_to_simplex(new_coefs, config.tau)
             new_coefs.update_coefficients(new_c)
-            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs, ADMM=True)
+            new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
             new_sig = new_atoms.calc_sig(new_coefs)
 
-            # if config.ADMM:
-            #     # min Lp
-            #     new_f = deepcopy(f)
-            #     Lambda = new_f.Lambda
-            #     Lp = Lambda / config.beta + new_sig.L
-            #     Lp = project_to_bound(Lp)
-
-            #     # max Lambda
-            #     d = new_sig.L - Lp
-            #     Lambda += config.beta * d
-
-            #     new_f.set_ADMM_params(Lambda, Lp)
-
-            f_new_sig = f(new_sig, ADMM=True)
+            f_new_sig = f(new_sig)
 
             if f_new_sig <= F_th:
                 atoms = new_atoms
                 coefs = new_coefs
-                # f = new_f
-                # if config.ADMM:
-                #     # min Lp
-                #     # Lp += config.alpha * (Lambda + config.beta * (CoGEnT_sig.L - Lp))
-                #     Lp = f.Lp
-                #     Lambda = f.Lambda
-                #     Lp = Lambda / config.beta + new_sig.L
-                #     Lp = project_to_bound(Lp)
-
-                #     # max Lambda
-                #     # d = new_sig.L - Lp
-                #     # Lambda += config.beta * d
-
-                #     f.set_ADMM_params(Lambda, Lp)
             else:
                 terminate = True
         else:
@@ -363,7 +336,7 @@ def create_sig(E, R, b, λ):
     coefs = Coefs()
 
     for i in range(b.shape[1]):
-        
+
         atom0 = GraphAtom()
         S, U = np.linalg.eigh(R[i])
         mask = S >= config.sig_rho_max - 0.0000001

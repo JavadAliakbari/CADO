@@ -424,7 +424,6 @@ def plot_results(
     atoms,
     epsilons,
     components,
-    admm,
     save_path,
     Lambda_norms=None,
     f_opt=None,
@@ -442,11 +441,9 @@ def plot_results(
     L = [component[0] for component in components]
     R = [component[1] for component in components]
     pi = [component[2] for component in components]
-    ADMM = [component[3] for component in components]
     plt.plot(L, label="L")
     plt.plot(R, label="R")
     plt.plot(pi, label="pi")
-    plt.plot(ADMM, label="ADMM")
     plt.plot(f_values, label="f")
     plt.title("Loss")
     plt.yscale("log")
@@ -497,18 +494,8 @@ def plot_results(
 
     ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25), dpi=dpi)
 
-    if admm is not None:
-        plt.figure()
-        plt.plot(Lambda_norms)
-        plt.title("Lambda norms")
-        plt.savefig(f"{save_path}Lambda_norms.png")
-        if isinstance(admm.Z, np.ndarray):
-            plot_adj(admm.Z, name="Lambda")
-        else:
-            plot_adj(admm.Z.L, name="Lambda")
 
-
-def save_model_params(atoms, coefs, graph, admm, save_path):
+def save_model_params(atoms, coefs, graph, save_path):
     os.makedirs(save_path, exist_ok=True)
     filename = f"{save_path}atoms.pkl"
     with open(filename, "wb") as fid:
@@ -520,15 +507,6 @@ def save_model_params(atoms, coefs, graph, admm, save_path):
     filename = f"{save_path}graph.pkl"
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)
-
-    if admm is not None:
-        filename = f"{save_path}admm.pkl"
-        with open(filename, "wb") as fid:
-            pkl.dump(admm, fid)
-
-        # filename = f"{save_path}Lp.pkl"
-        # with open(filename, "wb") as fid:
-        #     pkl.dump(admm.Lp, fid)
 
 
 def project_atoms_sig(atoms, coefs, graph):

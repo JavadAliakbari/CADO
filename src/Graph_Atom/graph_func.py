@@ -7,14 +7,10 @@ from utils.utils import *
 class GraphFunc(f):
     def __init__(self, graph: Graph, mu1=config.mu1, mu2=config.mu2) -> None:
         self.graph: Graph = graph
-        self.admm = None
         self.mu1 = mu1
         self.mu2 = mu2
 
-    def set_ADMM_params(self, admm):
-        self.admm = admm
-
-    def __call__(self, signal: GraphSig, ADMM=config.ADMM, components=False):
+    def __call__(self, signal: GraphSig, components=False):
         if signal is None:
             return 0
 
@@ -22,18 +18,10 @@ class GraphFunc(f):
         R_term = self.calc_R(signal)
         pi_term = self.calc_pi(signal)
 
-        # term5
-        if self.admm is not None and ADMM == "L":
-            admm_term = self.admm.admm_value(signal.L)
-        elif self.admm is not None and ADMM == "pi":
-            admm_term = self.admm.admm_value(signal.pi)
-        else:
-            admm_term = 0
-
-        obj = L_term + R_term + pi_term + admm_term
+        obj = L_term + R_term + pi_term
 
         if components:
-            return obj, L_term, R_term, pi_term, admm_term
+            return obj, L_term, R_term, pi_term
         else:
             return obj
 
@@ -83,56 +71,36 @@ class GraphFunc(f):
     def calc_cov(self):
         return self.graph.cov
 
-    def calc_grad(self, signal, ADMM=config.ADMM) -> GraphSig:
+    def calc_grad(self, signal) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal, ADMM=ADMM)
+        grad_L = self.calc_grad_L(signal)
         normalizer = signal.c * config.train_ratio if config.normalize else 1
         grad_R = self.calc_grad_R(signal) / normalizer
-        grad_pi = self.calc_grad_pi(signal, ADMM=ADMM) / normalizer
+        grad_pi = self.calc_grad_pi(signal) / normalizer
         grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
-    def calc_grad_L(self, signal: GraphSig, ADMM=config.ADMM):
+    def calc_grad_L(self, signal: GraphSig):
         normalizer = signal.n * config.p if config.normalize else 1
-        if self.admm is not None and ADMM == "L":
-            grad_admm = self.admm.calc_grad(signal.L)
-        else:
-            grad_admm = 0
 
         if config.Abar:
-            return (-self.graph.Abar) / normalizer + grad_admm
+            return (-self.graph.Abar) / normalizer
         else:
-            return (-self.graph.A + signal.L) / normalizer + grad_admm
-        # return self.graph.A
-
-    # def calc_grad_R(self, signal: GraphSig):
-    #     if signal.Rz is None:
-    #         signal.solve_R(self.graph.X)
-
-    #     results = np.einsum("ij,ik->ijk", signal.Rz, signal.Rz)
-    #     gradient_Rv = np.eye(self.graph.X.shape[1])[None, :] - results
-
-    #     return self.mu1 * gradient_Rv
+            return (-self.graph.A + signal.L) / normalizer
 
     def calc_grad_R(self, signal: GraphSig):
         # Second block: Gradient with respect to Rv_matrices
         if signal.Rv_inv is None:
             signal.calc_Rv_inv()
 
-        # gradient_Rv = Rv_inv - np.einsum(
-        #     "ijk,ikm,imn->ijn", Rv_inv, self.graph.cov, Rv_inv
-        # )
-        # gradient_Rv = np.eye(self.graph.num_features)[None, :] - np.einsum(
-        #     "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
-        # )
         gradient_Rv = signal.Rv_inv - np.einsum(
             "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
         )
 
         return self.mu1 * gradient_Rv
 
-    def calc_grad_pi(self, signal, ADMM=config.ADMM):
+    def calc_grad_pi(self, signal):
         # Third block: Gradient with respect to pi_kv
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
@@ -142,9 +110,4 @@ class GraphFunc(f):
         train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
         gradient_pi[train_nodes, train_labels] = 1
 
-        if self.admm is not None and ADMM == "pi":
-            grad_admm = self.admm.calc_grad(signal.pi)
-        else:
-            grad_admm = 0
-
-        return -self.mu2 * gradient_pi - grad_admm
+        return -self.mu2 * gradient_pi

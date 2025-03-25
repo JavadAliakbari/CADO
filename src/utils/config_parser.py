@@ -22,7 +22,6 @@ class Config:
         self.beta = self.config["beta"]
         self.local_iter = self.config["local_iter"]
         self.Abar = self.config["Abar"]
-        self.ADMM = self.config["ADMM"]
         self.train_ratio = self.config["train_ratio"]
         self.lr = self.config["lr"]
         self.p = self.config["p"]
