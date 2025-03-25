@@ -47,7 +47,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
-    coefs = coefs_opt
+    # coefs = coefs_opt
     # atoms = atoms_opt
 
     atoms, coefs = map_to_simplex(atoms, coefs, None, None)

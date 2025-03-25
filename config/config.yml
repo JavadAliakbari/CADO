@@ -3,7 +3,7 @@ mu1: 0.01
 mu2: 0.5
 beta: 0.1
 local_iter: 1
-cogent_iters: 4500
+cogent_iters: 2000
 iter_or_cycles_to_find_next_atom: 30
 rho_min: 0.5                             # Minimum eigenvalue of Ri
 rho_max: 2                               # Maximum eigenvalue of Ri
