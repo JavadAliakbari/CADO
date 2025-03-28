@@ -1,24 +1,28 @@
-mu1: 1
-mu2: 10
+mu1: 0.1
+mu2: 0.1
 beta: 100
 local_iter: 1
 ADMM_iter: 1
-cogent_iters: 1000
+cogent_iters: 5
 iter_or_cycles_to_find_next_atom: 30
 rho_min: 0.5                             # Minimum eigenvalue of Ri
-rho_max: 5                               # Maximum eigenvalue of Ri
-sig_rho_min: 0.5                         # Minimum eigenvalue of Ri
+rho_max: 2                               # Maximum eigenvalue of Ri
+sig_rho_min: 0.1                         # Minimum eigenvalue of Ri
 sig_rho_max: 5                           # Maximum eigenvalue of Ri
-GP_iters: 500
-GP_tol: 0.000001
+GP_iters: 800
+GP_tol: 0.00000001
 line_search: False
 iner_iter_GA_R: 10000
 iner_step_GA_R: 0.01
-Abar: False
+Abar: True
 ADMM: "L"
-train_ratio: 0.5
+train_ratio: 0.6
 lr: 0.1
-p: 0.3
+p: 0.8
 q: 0.1
 CGD: True
-warm_start: "random"                  # "optimal" or "random" or "cluster"
+warm_start: "cluster"                  # "optimal" or "random" or "cluster"
+
+samples_per_cluster: [100, 100, 100] 
+num_features: 15
+num_signal_features: 3

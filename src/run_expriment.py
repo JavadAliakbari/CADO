@@ -13,29 +13,12 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [100, 100, 100]  # Number of training samples in each cluster
-    num_features = 6  # Dimension of the features at each node
-    num_signal_features = 2
+    samples_per_cluster = config.samples_per_cluster 
+    num_features = config.num_features
+    num_signal_features = config.num_signal_features
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     n_clusters = c
-
-    ##### add for loop for p and q for q in range(0.,1.,0.1):
-    simulation_number = 1
-
-    acc_clustering_avg = []
-    acc_clustering_std = []
-    acc_our_method_avg = []
-    acc_our_method_std = []
-
-    f_clustering_avg = []
-    f_clustering_std = []
-    f_our_method_avg = []
-    f_our_method_std = []
-
-    p_vals = np.arange(0.4, 0.04, -0.02)
-    total_runs = 50
-    bar = tqdm(total=len(p_vals))
 
     probs = np.full((c, c), config.q)
     np.fill_diagonal(probs, config.p)

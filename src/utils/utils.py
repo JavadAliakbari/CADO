@@ -523,6 +523,11 @@ def save_model_params(atoms, coefs, graph, admm, save_path):
         with open(filename, "wb") as fid:
             pkl.dump(admm.Lp, fid)
 
+    # save the configuration
+    filename = f"{save_path}config.json"
+    with open(filename, "w") as fid:
+        json.dump(config.__dict__, fid, indent=4)
+
 
 def project_atoms_sig(atoms, coefs, graph):
     sig = atoms.calc_sig(coefs)

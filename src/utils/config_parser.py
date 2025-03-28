@@ -28,6 +28,9 @@ class Config:
         self.q = self.config["q"]
         self.CGD = self.config["CGD"]
         self.warm_start = self.config["warm_start"]
+        self.samples_per_cluster = self.config["samples_per_cluster"]
+        self.num_features = self.config["num_features"]
+        self.num_signal_features = self.config["num_signal_features"]
 
     def load_config(path):
         with open(path) as f:

@@ -2,10 +2,9 @@ import numpy as np
 from tqdm import tqdm
 
 from Graph_Atom.ADMM import ADMM_cls
-from utils.SBM import SBM
 from Graph_Atom.graph_func import GraphFunc
-
 from utils.algorithm_utils_orig import *
+from utils.SBM import SBM
 from utils.utils import *
 
 # Set print options to show the entire array
@@ -77,8 +76,8 @@ if __name__ == "__main__":
             np.random.shuffle(idx)
             # atoms.rearnge(idx)
             # coefs.rearnge(idx)
-            sig = atoms.calc_sig(coefs)  # Update signal
             for ind in idx:
+                sig = atoms.calc_sig(coefs)  # Update signal
                 sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
                 grad = f.calc_grad(sig2)
                 # grad_atom = atom.calc_grad(grad)
@@ -86,14 +85,15 @@ if __name__ == "__main__":
                 atoms[ind].conditional_gradient_update(
                     grad, ii * config.local_iter + itr
                 )
-                sig = atoms.calc_sig(coefs)  # Update signal
-                f_sig = f(sig)
-                f_values.append(f_sig)
-                # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
-        if ii % 1000 == 0:
+                # sig = atoms.calc_sig(coefs)  # Update signal
+            # f_sig = f(sig)
+            # f_values.append(f_sig)
+            # atoms, coefs = update_coefs(atoms, f, coefs, sig, 0.2, 20)  # Update coefs
+        if ii % 1 == 0:
             coefs = Enhancemnet_step(atoms, f, coefs)
 
         if admm is not None:
+            sig = atoms.calc_sig(coefs)  # Update signal
             if config.ADMM == "L":
                 diff, lambda_term, Lambda_norm = admm.ADMM_update(sig.L)
             elif config.ADMM == "pi":
@@ -105,6 +105,7 @@ if __name__ == "__main__":
             diff = 0
             lambda_term = 0
             Lambda_norm = 0
+        sig = atoms.calc_sig(coefs)  # Update signal
         f_sig, L_term, R_term, pi_term, ADMM_term = f(sig, ADMM=False, components=True)
 
         y_pred = np.argmax(sig.pi, axis=1)
