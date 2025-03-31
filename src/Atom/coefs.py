@@ -23,6 +23,46 @@ class Coefs:
     def __setitem__(self, idx, value):
         self.coefs[idx] = value
 
+    def __add__(self, coefs_):
+        coefs = []
+        for c1, c2 in zip(self.coefs, coefs_):
+            c = c1 + c2
+            coefs.append(c)
+
+        return Coefs(coefs)
+
+    def __radd__(self, c_):
+        coefs = []
+        for c1 in self.coefs:
+            c = c1 + c_
+            coefs.append(c)
+
+        return Coefs(coefs)
+
+    def __sub__(self, coefs_):
+        coefs = []
+        for c1, c2 in zip(self.coefs, coefs_):
+            c = c1 - c2
+            coefs.append(c)
+
+        return Coefs(coefs)
+
+    def __mul__(self, c_):
+        coefs = []
+        for c1 in self.coefs:
+            c = c1 * c_
+            coefs.append(c)
+
+        return Coefs(coefs)
+
+    def __rmul__(self, c_):
+        coefs = []
+        for c1 in self.coefs:
+            c = c1 * c_
+            coefs.append(c)
+
+        return Coefs(coefs)
+
     def shuffle(self):
         np.random.shuffle(self.coefs)
 

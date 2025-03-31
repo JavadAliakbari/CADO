@@ -7,9 +7,9 @@ from utils.utils import *
 
 
 class GraphAtom(Atom):
-    def __init__(self, optimizer_type="adam") -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.optimizer = get_optimizer(optimizer_type)
+        self.optimizer = get_optimizer(config.optimizer.type)
 
     def set_params(self, e, R, b) -> None:
         self.e = e
@@ -93,7 +93,7 @@ class GraphAtom(Atom):
 
         return grad_bi
 
-    def update(self, grad, lr, use_optimizer=True):
+    def update(self, grad):
         """Update atom parameters using optimizer or gradient descent
 
         Args:
@@ -101,24 +101,18 @@ class GraphAtom(Atom):
             lr (float): Learning rate
             use_optimizer (bool): Whether to use optimizer or standard gradient descent
         """
-        if use_optimizer:
-            # Collect parameters and gradients as dictionaries for the optimizer
-            params = {"e": self.e, "R": self.R, "b": self.b}
+        # Collect parameters and gradients as dictionaries for the optimizer
+        params = {"e": self.e, "R": self.R, "b": self.b}
 
-            gradients = {"e": grad.e, "R": grad.R, "b": grad.b}
+        gradients = {"e": grad.e, "R": grad.R, "b": grad.b}
 
-            # Use optimizer to update parameters
-            updated_params = self.optimizer.step(params, gradients, lr)
+        # Use optimizer to update parameters
+        updated_params = self.optimizer.step(params, gradients)
 
-            # Apply updates
-            self.e = updated_params["e"]
-            self.R = updated_params["R"]
-            self.b = updated_params["b"]
-        else:
-            # Original gradient descent update
-            self.e -= lr * grad.e
-            self.R -= lr * grad.R
-            self.b -= lr * grad.b
+        # Apply updates
+        self.e = updated_params["e"]
+        self.R = updated_params["R"]
+        self.b = updated_params["b"]
 
         # Project to ensure constraints are satisfied
         self.project_to_bound()
@@ -131,30 +125,6 @@ class GraphAtom(Atom):
     def reset_optimizer_state(self):
         """Reset the optimizer state"""
         self.optimizer.reset()
-
-    def get_scheduled_lr(self, lr):
-        """Calculate learning rate based on scheduling strategy.
-
-        Args:
-            lr (float): Base learning rate
-
-        Returns:
-            float: Scheduled learning rate
-        """
-        if self.initial_lr is None:
-            # Initialize scheduling parameters on first call
-            self.initial_lr = lr
-            self.min_lr = lr * 0.01  # Minimum LR is 1% of initial
-            self.decay_rate = 0.95  # Decay by 5%
-            self.decay_steps = 100  # Decay every 100 steps
-
-        # Exponential decay schedule
-        scheduled_lr = self.initial_lr * (
-            self.decay_rate ** (self.t // self.decay_steps)
-        )
-
-        # Ensure learning rate doesn't go below minimum
-        return max(scheduled_lr, self.min_lr)
 
     def __str__(self):
         return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
@@ -282,3 +252,29 @@ class GraphAtom(Atom):
         a = self.calc_grad_bi(grad)
         self.b = np.zeros(grad.pi.shape[-1], dtype=float)
         self.b[np.argmin(a)] = 1
+
+    def __add__(self, atom):
+        e = np.sqrt(self.e**2 + atom.e**2)
+        R = self.R + atom.R
+        b = self.b + atom.b
+        R = project_to_psd_cone(R, config.rho_min, config.rho_max)
+
+        atom = GraphAtom()
+        atom.set_params(e, R, b)
+        return atom
+
+    def __mul__(self, c):
+        e = np.sqrt(c) * self.e
+        R = c * self.R
+        b = c * self.b
+        atom = GraphAtom()
+        atom.set_params(e, R, b)
+        return atom
+
+    def __rmul__(self, c):
+        e = np.sqrt(c) * self.e
+        R = c * self.R
+        b = c * self.b
+        atom = GraphAtom()
+        atom.set_params(e, R, b)
+        return atom

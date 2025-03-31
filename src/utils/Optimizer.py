@@ -7,7 +7,7 @@ class Optimizer(ABC):
     """Abstract base class for optimizers"""
 
     @abstractmethod
-    def step(self, params, gradients, lr):
+    def step(self, params, gradients):
         """Update parameters based on gradients"""
         pass
 
@@ -29,12 +29,10 @@ class Adam(Optimizer):
             epsilon (float, optional): Small constant to prevent division by zero
         """
         # Use values from config or fallback to defaults
-        adam_config = config.optimizer.get("adam", {})
-        self.beta1 = beta1 if beta1 is not None else adam_config.get("beta1", 0.9)
-        self.beta2 = beta2 if beta2 is not None else adam_config.get("beta2", 0.999)
-        self.epsilon = (
-            epsilon if epsilon is not None else adam_config.get("epsilon", 1e-8)
-        )
+        optimizer_config = config.optimizer
+        self.beta1 = beta1 if beta1 is not None else optimizer_config.beta1
+        self.beta2 = beta2 if beta2 is not None else optimizer_config.beta2
+        self.epsilon = epsilon if epsilon is not None else optimizer_config.epsilon
 
         # Optimizer state
         self.m = {}  # First moment estimates
@@ -42,13 +40,12 @@ class Adam(Optimizer):
         self.t = 0  # Time step
 
         # Learning rate scheduling parameters from config
-        lr_config = config.optimizer.get("learning_rate", {})
-        self.initial_lr = lr_config.get("initial")
-        self.min_lr = lr_config.get("min")
-        self.decay_rate = lr_config.get("decay_rate")
-        self.decay_steps = lr_config.get("decay_steps")
+        self.initial_lr = optimizer_config.lr
+        self.min_lr = optimizer_config.min
+        self.decay_rate = optimizer_config.decay_rate
+        self.decay_steps = optimizer_config.decay_steps
 
-    def step(self, params, gradients, lr):
+    def step(self, params, gradients):
         """Perform one optimization step
 
         Args:
@@ -63,7 +60,7 @@ class Adam(Optimizer):
         self.t += 1
 
         # Get scheduled learning rate
-        scheduled_lr = self._get_scheduled_lr(lr)
+        scheduled_lr = self._get_scheduled_lr()
 
         # Update for each parameter
         for key in params:
@@ -104,7 +101,7 @@ class Adam(Optimizer):
         self.decay_rate = None
         self.decay_steps = None
 
-    def _get_scheduled_lr(self, lr):
+    def _get_scheduled_lr(self):
         """Calculate learning rate based on scheduling strategy
 
         Args:
@@ -115,11 +112,11 @@ class Adam(Optimizer):
         """
         if self.initial_lr is None:
             # Use values from config if available, otherwise set defaults
-            lr_config = config.optimizer.get("learning_rate", {})
-            self.initial_lr = lr
-            self.min_lr = lr_config.get("min", lr * 0.01)
-            self.decay_rate = lr_config.get("decay_rate", 0.95)
-            self.decay_steps = lr_config.get("decay_steps", 100)
+            optimizer_config = config.optimizer
+            self.initial_lr = optimizer_config.lr
+            self.min_lr = optimizer_config.min
+            self.decay_rate = optimizer_config.decay_rate
+            self.decay_steps = optimizer_config.decay_steps
 
         # Exponential decay schedule
         scheduled_lr = self.initial_lr * (
@@ -161,22 +158,19 @@ class SGD(Optimizer):
             momentum (float, optional): Momentum factor
         """
         # Use values from config or fallback to defaults
-        sgd_config = config.optimizer.get("sgd", {})
-        self.momentum = (
-            momentum if momentum is not None else sgd_config.get("momentum", 0.0)
-        )
+        optimizer_config = config.optimizer
+        self.momentum = momentum if momentum is not None else optimizer_config.momentum
 
         self.velocity = {}  # Velocity for momentum
         self.t = 0  # Time step
 
         # Learning rate scheduling parameters from config
-        lr_config = config.optimizer.get("learning_rate", {})
-        self.initial_lr = lr_config.get("initial")
-        self.min_lr = lr_config.get("min")
-        self.decay_rate = lr_config.get("decay_rate")
-        self.decay_steps = lr_config.get("decay_steps")
+        self.initial_lr = optimizer_config.lr
+        self.min_lr = optimizer_config.min
+        self.decay_rate = optimizer_config.decay_rate
+        self.decay_steps = optimizer_config.decay_steps
 
-    def step(self, params, gradients, lr):
+    def step(self, params, gradients):
         """Perform one optimization step
 
         Args:
@@ -191,7 +185,7 @@ class SGD(Optimizer):
         self.t += 1
 
         # Get scheduled learning rate
-        scheduled_lr = self._get_scheduled_lr(lr)
+        scheduled_lr = self._get_scheduled_lr()
 
         # Update for each parameter
         for key in params:
@@ -221,7 +215,7 @@ class SGD(Optimizer):
         self.decay_rate = None
         self.decay_steps = None
 
-    def _get_scheduled_lr(self, lr):
+    def _get_scheduled_lr(self):
         """Calculate learning rate based on scheduling strategy
 
         Args:
@@ -232,11 +226,11 @@ class SGD(Optimizer):
         """
         if self.initial_lr is None:
             # Use values from config if available, otherwise set defaults
-            lr_config = config.optimizer.get("learning_rate", {})
-            self.initial_lr = lr
-            self.min_lr = lr_config.get("min", lr * 0.01)
-            self.decay_rate = lr_config.get("decay_rate", 0.95)
-            self.decay_steps = lr_config.get("decay_steps", 100)
+            optimizer_config = config.optimizer
+            self.initial_lr = optimizer_config.lr
+            self.min_lr = optimizer_config.min
+            self.decay_rate = optimizer_config.decay_rate
+            self.decay_steps = optimizer_config.decay_steps
 
         # Exponential decay schedule
         scheduled_lr = self.initial_lr * (
@@ -259,7 +253,7 @@ def get_optimizer(optimizer_type=None, **kwargs):
     """
     # Use optimizer type from config if not specified
     if optimizer_type is None:
-        optimizer_type = config.optimizer.get("type", "adam")
+        optimizer_type = config.optimizer.type
 
     optimizer_type = optimizer_type.lower()
 

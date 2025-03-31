@@ -22,6 +22,38 @@ class Atoms:
     def __getitem__(self, idx):
         return self.atoms[idx]
 
+    def __add__(self, atoms_):
+        atoms = Atoms()
+        for atom1, atom2 in zip(self.atoms, atoms_):
+            atom = atom1 + atom2
+            atoms.add_atom(atom)
+
+        return atoms
+
+    def __sub__(self, atoms_):
+        atoms = Atoms()
+        for atom1, atom2 in zip(self.atoms, atoms_):
+            atom = atom1 - atom2
+            atoms.add_atom(atom)
+
+        return atoms
+
+    def __mul__(self, c):
+        atoms = Atoms()
+        for atom1 in self.atoms:
+            atom = atom1 * c
+            atoms.add_atom(atom)
+
+        return atoms
+
+    def __rmul__(self, c):
+        atoms = Atoms()
+        for atom1 in self.atoms:
+            atom = atom1 * c
+            atoms.add_atom(atom)
+
+        return atoms
+
     def shuffle(self):
         np.random.shuffle(self.atoms)
 
@@ -50,5 +82,3 @@ class Atoms:
         # sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
 
         return sig
-    
-    

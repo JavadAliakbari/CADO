@@ -1,21 +1,18 @@
-import os
-import sys
-
 import numpy as np
-from tqdm import tqdm
+from sklearn.metrics import adjusted_rand_score
 
-from Neurips.idea2 import CANO
+from idea3 import CANO
 from load_atom import load_atom
 from utils.algorithm_utils_orig import *
 from utils.SBM import SBM
 from utils.utils import *
-from sklearn.metrics import adjusted_rand_score
 
 # Set print options to show the entire array
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [100, 100, 100]  # Number of training samples in each cluster
+    samples_per_cluster = [300, 300, 300]  # Number of training samples in each cluster
+    # samples_per_cluster = [500, 300, 100]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
     num_signal_features = 2
     n = sum(samples_per_cluster)

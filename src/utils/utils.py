@@ -480,7 +480,7 @@ def plot_results(
         ax.clear()
         for id, e in enumerate(epsilons[frame]):
             ax.plot(e, "*", label=f"atom {id}")
-        ax.legend()
+        ax.legend(loc="lower right")
         ax.set_title(f"Eigenvectors_{frame} acc: {accuracies[frame]:.2f}")
         ax.set_ylim(min_e, max_e)
 

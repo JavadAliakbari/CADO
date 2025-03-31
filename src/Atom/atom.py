@@ -9,5 +9,14 @@ class Atom:
     def calc_sig_term(self) -> Sig:
         raise NotImplementedError
 
-    # def set_params(self, coef) -> None:
-    #     self.coef = coef
+    def __add__(self, atom):
+        raise NotImplementedError
+
+    def __sub__(self, atom):
+        raise NotImplementedError
+
+    def __mul__(self, c):
+        raise NotImplementedError
+
+    def __rmul__(self, c):
+        raise NotImplementedError

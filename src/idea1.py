@@ -6,35 +6,19 @@ from utils.algorithm_utils_orig import *
 from utils.utils import *
 
 
-def map_to_simplex(atoms: Atoms, coefs: Coefs, grads=None, g=None, lr=None):
+def map_to_simplex(atoms: Atoms, coefs: Coefs):
     # s = np.array([np.sign(atom.e) for atom in atoms]).T
     Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    if grads is not None:
-        grad_Piv = np.array(
-            [
-                2 * coef * grad_atom.e**2 + 2 * grad_c * atom.e**2
-                for grad_c, grad_atom, coef, atom in zip(g, grads, coefs, atoms)
-            ]
-        ).T
-        dd = np.mean(grad_Piv, axis=1)
-        grad_Piv -= dd[:, None]
-        Piv -= lr * grad_Piv
     Piv = project_to_simplex(Piv, 1)
     # Piv = Piv / np.sum(Piv, axis=1)[:, None]
     c = np.sum(Piv, axis=0)
-    coefs.update_coefficients(c)
     E2 = Piv / (c[None, :] + 1e-10)
     E = np.sqrt(E2)
     # E = s * np.sqrt(E2)
     for atom_idx, atom in enumerate(atoms):
         atom.e = E[:, atom_idx]
-        if grads is not None:
-            atom.R -= 2 * coefs[atom_idx] * lr * grads[atom_idx].R
-            atom.b -= 2 * coefs[atom_idx] * lr * grads[atom_idx].b
 
-            atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
-            atom.b = project_to_simplex(atom.b, 1)
-
+    coefs.update_coefficients(c)
     return atoms, coefs
 
 
@@ -47,13 +31,10 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
-    # coefs = coefs_opt
-    # atoms = atoms_opt
 
-    atoms, coefs = map_to_simplex(atoms, coefs, None, None)
+    atoms, coefs = map_to_simplex(atoms, coefs)
     sig = atoms.calc_sig(coefs)
     opt_sig = atoms_opt.calc_sig(coefs_opt)
-    # sig = EmptySig(n, num_features, c)
     f = GraphFunc(graph=graph)
     f_opt = f(opt_sig)
 
@@ -67,19 +48,24 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     components = []
     # coefs.update_coefficients(coefs_opt.get_coefs())
     for ii in range(config.iters):
-        grads = []
-        for ind in range(num_atoms):
+        idx = np.arange(num_atoms)
+        np.random.shuffle(idx)
+
+        for ind in idx:
             sig = atoms.calc_sig(coefs)  # Update signal
-            grad = f.calc_grad(sig)
-            grad_atom = atoms[ind].calc_grad(grad)
-            grads.append(grad_atom)
-        grads = np.array(grads)
+            if config.CGD:
+                sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
+                grad = f.calc_grad(sig2)
+                atoms[ind].conditional_gradient_update(grad, ii * config.local_iter)
+                # atoms, coefs = map_to_simplex(atoms, coefs)
+            else:
+                grad = f.calc_grad(sig)
+                grad_atom = 2 * coefs[ind] * atoms[ind].calc_grad(grad)
+                atoms[ind].update(grad_atom)  # Update atom
 
-        g = np.array(
-            [grad.dot(atom.calc_sig_term()) for atom in atoms]
-        )  # Gradient of the function
-
-        atoms, coefs = map_to_simplex(atoms, coefs, grads, g, config.lr)
+            if ii % config.local_iter == 0:
+                # coefs = Enhancemnet_step2(atoms, f, coefs, iters=10, lr=0.0001)
+                atoms, coefs = map_to_simplex(atoms, coefs)
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
@@ -95,7 +81,6 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
             "f_opt": f"{f_opt:,.4f}",
-            # "beta": config.beta,
         }
 
         # if log_results:

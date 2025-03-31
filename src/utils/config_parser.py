@@ -23,7 +23,6 @@ class Config:
         self.local_iter = self.config["local_iter"]
         self.Abar = self.config["Abar"]
         self.train_ratio = self.config["train_ratio"]
-        self.lr = self.config["lr"]
         self.p = self.config["p"]
         self.q = self.config["q"]
         self.CGD = self.config["CGD"]
@@ -31,7 +30,7 @@ class Config:
         self.normalize = self.config["normalize"]
 
         # Load optimizer configurations
-        self.optimizer = self._load_optimizer_config()
+        self.optimizer = OptimizerConfig(self.config["optimizer"])
 
     def _load_optimizer_config(self):
         """Load optimizer configuration from the config file"""
@@ -41,8 +40,8 @@ class Config:
         default_optimizer = {
             "type": "adam",
             "learning_rate": {
-                "initial": self.lr,  # Use global lr as default
-                "min": self.lr * 0.01,
+                "initial": 0.01,  # Use global lr as default
+                "min": 0.0001,
                 "decay_rate": 0.95,
                 "decay_steps": 100,
             },
@@ -66,3 +65,16 @@ class Config:
             config = yaml.load(f, yaml.FullLoader)
 
         return config
+
+
+class OptimizerConfig:
+    def __init__(self, config):
+        self.type = config["type"]
+        self.lr = config["learning_rate"]["initial"]
+        self.min = config["learning_rate"]["min"]
+        self.decay_rate = config["learning_rate"]["decay_rate"]
+        self.decay_steps = config["learning_rate"]["decay_steps"]
+        self.beta1 = config["adam"]["beta1"]
+        self.beta2 = config["adam"]["beta2"]
+        self.epsilon = config["adam"]["epsilon"]
+        self.momentum = config["sgd"]["momentum"]

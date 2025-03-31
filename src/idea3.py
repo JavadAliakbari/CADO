@@ -6,19 +6,52 @@ from utils.algorithm_utils_orig import *
 from utils.utils import *
 
 
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    # s = np.array([np.sign(atom.e) for atom in atoms]).T
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    Piv = project_to_simplex(Piv, 1)
-    # Piv = Piv / np.sum(Piv, axis=1)[:, None]
+def Piv2EC(Piv):
     c = np.sum(Piv, axis=0)
     E2 = Piv / (c[None, :] + 1e-10)
     E = np.sqrt(E2)
-    # E = s * np.sqrt(E2)
-    for atom_idx, atom in enumerate(atoms):
-        atom.e = E[:, atom_idx]
 
+    return E, c
+
+
+def map_to_simplex(atoms: Atoms, coefs: Coefs):
+    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
+    Piv = project_to_simplex(Piv, 1)
+    E, c = Piv2EC(Piv)
     coefs.update_coefficients(c)
+    for idx, atom in enumerate(atoms):
+        atom.e = E[:, idx]
+
+    return atoms, coefs
+
+
+def update(atoms: Atoms, coefs: Coefs, grad):
+    # Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
+    grad_Piv = np.array(
+        [
+            2 * coef * atom.calc_grad_ei(grad)
+            + grad.dot(atom.calc_sig_term()) * (atom.e**2)
+            for coef, atom in zip(coefs, atoms)
+        ]
+    ).T
+
+    # Convert argmin to one-hot matrix
+    min_indices = np.argmin(grad_Piv, axis=1)
+    new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
+    alpha = config.optimizer.lr
+    new_E, new_c = Piv2EC(new_Piv)
+    new_coefs = Coefs(new_c)
+    new_atoms = Atoms()
+    for idx, atom in enumerate(atoms):
+        new_atom = GraphAtom()
+        new_atom.set_params(new_E[:, idx], atom.R, atom.b)
+        new_atom.update_R(grad)
+        new_atom.update_b(grad)
+        new_atoms.add_atom(new_atom)
+
+    atoms = (1 - alpha) * atoms + alpha * new_atoms
+    coefs = (1 - alpha) * coefs + alpha * new_coefs
+
     return atoms, coefs
 
 
@@ -30,7 +63,6 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     if atoms is None:
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
-    num_atoms = len(atoms)
 
     atoms, coefs = map_to_simplex(atoms, coefs)
     sig = atoms.calc_sig(coefs)
@@ -42,30 +74,15 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
 
     # if log_results:
     bar = tqdm(total=config.iters, leave=False)
+    f_old = 0
     f_values = [f_sig]
     accuracies = []
     epsilsons = []
     components = []
-    # coefs.update_coefficients(coefs_opt.get_coefs())
+
     for ii in range(config.iters):
-        idx = np.arange(num_atoms)
-        np.random.shuffle(idx)
-
-        for ind in idx:
-            sig = atoms.calc_sig(coefs)  # Update signal
-            if config.CGD:
-                sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
-                grad = f.calc_grad(sig2)
-                atoms[ind].conditional_gradient_update(grad, ii * config.local_iter)
-                # atoms, coefs = map_to_simplex(atoms, coefs)
-            else:
-                grad = f.calc_grad(sig)
-                grad_atom = atoms[ind].calc_grad(grad)
-                atoms[ind].update(grad_atom, 2 * coefs[ind] * config.lr)  # Update atom
-
-            if ii % config.local_iter == 0:
-                # coefs = Enhancemnet_step2(atoms, f, coefs, iters=10, lr=0.0001)
-                atoms, coefs = map_to_simplex(atoms, coefs)
+        grad = f.calc_grad(sig)
+        atoms, coefs = update(atoms, coefs, grad)
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
@@ -91,7 +108,9 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         epsilsons.append([atoms.e.copy() for atoms in atoms])
         components.append([L_term, R_term, pi_term])
 
-    atoms, coefs = map_to_simplex(atoms, coefs)
+        if np.abs(f_sig - f_old) < 1e-6:
+            break
+        f_old = f_sig
 
     return (
         atoms,

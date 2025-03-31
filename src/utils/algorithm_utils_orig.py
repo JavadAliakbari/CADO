@@ -230,7 +230,11 @@ def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
 
 
 def Enhancemnet_step2(
-    atoms: Atoms, f: GraphFunc, coefs: Coefs, iters=config.GP_iters, lr=config.lr
+    atoms: Atoms,
+    f: GraphFunc,
+    coefs: Coefs,
+    iters=config.GP_iters,
+    lr=config.optimizer.lr,
 ):
     stop_flag = False
     iter = 0
