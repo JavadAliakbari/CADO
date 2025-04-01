@@ -75,9 +75,8 @@ class GraphFunc(f):
         if signal is None:
             return 0
         grad_L = self.calc_grad_L(signal)
-        normalizer = signal.c * config.train_ratio if config.normalize else 1
-        grad_R = self.calc_grad_R(signal) / normalizer
-        grad_pi = self.calc_grad_pi(signal) / normalizer
+        grad_R = self.calc_grad_R(signal)
+        grad_pi = self.calc_grad_pi(signal)
         grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
@@ -90,17 +89,22 @@ class GraphFunc(f):
             return (-self.graph.A + signal.L) / normalizer
 
     def calc_grad_R(self, signal: GraphSig):
+        normalizer = signal.d if config.normalize else 1
         # Second block: Gradient with respect to Rv_matrices
         if signal.Rv_inv is None:
             signal.calc_Rv_inv()
 
-        gradient_Rv = signal.Rv_inv - np.einsum(
+        gradient_Rv = np.eye(signal.d)[None, :] - np.einsum(
             "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
         )
+        # gradient_Rv = signal.Rv_inv - np.einsum(
+        #     "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
+        # )
 
-        return self.mu1 * gradient_Rv
+        return self.mu1 * gradient_Rv / normalizer
 
     def calc_grad_pi(self, signal):
+        normalizer = signal.c * config.train_ratio if config.normalize else 1
         # Third block: Gradient with respect to pi_kv
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
@@ -110,4 +114,4 @@ class GraphFunc(f):
         train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
         gradient_pi[train_nodes, train_labels] = 1
 
-        return -self.mu2 * gradient_pi
+        return -self.mu2 * gradient_pi / normalizer

@@ -14,8 +14,8 @@ class SBM(Graph):
         num_features,
         num_signal_features,
         train_ratio=1,
-        rho_min=config.rho_min,
-        rho_max=config.rho_max,
+        rho_min=config.sig_rho_min,
+        rho_max=config.sig_rho_max,
     ) -> None:
         num_nodes = sum(block_sizes)
         super().__init__(num_nodes, train_ratio)
@@ -31,7 +31,7 @@ class SBM(Graph):
         self.rho_min = rho_min
         self.rho_max = rho_max
 
-        self.Ri_matrices, self.Rv_matrices, self.X = self.create_features2()
+        self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)

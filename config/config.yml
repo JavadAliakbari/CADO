@@ -1,21 +1,21 @@
 mu0: 15
-mu1: 0.0
-mu2: 0.5
+mu1: 0.6
+mu2: 0.1
 beta: 0.1
 local_iter: 1
 cogent_iters: 1500
 iter_or_cycles_to_find_next_atom: 30
-rho_min: 0.5                             
-rho_max: 10                               
+rho_min: 0.5                          
+rho_max: 5                             
 sig_rho_min: 0.5                         
-sig_rho_max: 10                           
+sig_rho_max: 5                           
 GP_iters: 500
 GP_tol: 0.000001
 iner_iter_GA_R: 10000
 iner_step_GA_R: 0.01
 Abar: True
 train_ratio: 0.2
-p: 0.34
+p: 0.1
 q: 0.05
 CGD: False
 warm_start: "random"                  # "optimal" or "random" or "cluster"
