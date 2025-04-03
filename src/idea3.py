@@ -8,7 +8,10 @@ from utils.utils import *
 
 def Piv2EC(Piv):
     c = np.sum(Piv, axis=0)
+    # n = Piv.shape[0]
     E2 = Piv / (c[None, :] + 1e-10)
+    # idx = c == 0
+    # E2[:, idx] = np.full((n, np.sum(idx)), 1 / n)
     E = np.sqrt(E2)
 
     return E, c
@@ -51,7 +54,7 @@ def update(atoms: Atoms, coefs: Coefs, grad):
 
     atoms = (1 - alpha) * atoms + alpha * new_atoms
     coefs = (1 - alpha) * coefs + alpha * new_coefs
-
+    # atoms, coefs = map_to_simplex(atoms, coefs)
     return atoms, coefs
 
 
@@ -111,6 +114,8 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         if np.abs(f_sig - f_old) < 1e-6:
             break
         f_old = f_sig
+
+    atoms, coefs = map_to_simplex(atoms, coefs)
 
     return (
         atoms,
