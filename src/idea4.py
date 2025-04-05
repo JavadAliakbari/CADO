@@ -2,9 +2,17 @@ import numpy as np
 from tqdm import tqdm
 
 from Graph_Atom.graph_func import GraphFunc
-from utils.Optimizer import get_optimizer
 from utils.algorithm_utils_orig import *
 from utils.utils import *
+
+
+def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
+    coefs = (1 - alpha) * coefs1 + alpha * coefs2
+    alpha_i = alpha * coefs2 / coefs
+    atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
+    # # # atoms, coefs = map_to_simplex(atoms, coefs)
+
+    return atoms, coefs
 
 
 def line_search(atoms1, coefs1, atoms2, coefs2, f):
@@ -47,13 +55,11 @@ def line_search2(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
     alpha_low = 0
     alpha_high = 0.1
 
-    atoms_low = (1 - alpha_low) * atoms1 + alpha_low * atoms2
-    coefs_low = (1 - alpha_low) * coefs1 + alpha_low * coefs2
+    atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
     sig_low = atoms_low.calc_sig(coefs_low)
     f1 = f(sig_low)
 
-    atoms_high = (1 - alpha_high) * atoms1 + alpha_high * atoms2
-    coefs_high = (1 - alpha_high) * coefs1 + alpha_high * coefs2
+    atoms_high, coefs_high = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_high)
     sig_high = atoms_high.calc_sig(coefs_high)
     f2 = f(sig_high)
 
@@ -64,16 +70,17 @@ def line_search2(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
 
         if f1 > f2:
             alpha_low = 0.5 * (alpha_high + alpha_low)
-
-            atoms_low = (1 - alpha_low) * atoms1 + alpha_low * atoms2
-            coefs_low = (1 - alpha_low) * coefs1 + alpha_low * coefs2
+            atoms_low, coefs_low = interpolate(
+                atoms1, coefs1, atoms2, coefs2, alpha_low
+            )
             sig_low = atoms_low.calc_sig(coefs_low)
             f1 = f(sig_low)
         else:
             alpha_high = 0.5 * (alpha_high + alpha_low)
 
-            atoms_high = (1 - alpha_high) * atoms1 + alpha_high * atoms2
-            coefs_high = (1 - alpha_high) * coefs1 + alpha_high * coefs2
+            atoms_high, coefs_high = interpolate(
+                atoms1, coefs1, atoms2, coefs2, alpha_high
+            )
             sig_high = atoms_high.calc_sig(coefs_high)
             f2 = f(sig_high)
 
@@ -84,8 +91,7 @@ def line_search2(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
         alpha = alpha_high
 
     # Update atoms and coefficients using the optimal alpha
-    atoms = (1 - alpha) * atoms1 + alpha * atoms2
-    coefs = (1 - alpha) * coefs1 + alpha * coefs2
+    atoms, coefs = interpolate(atoms1, coefs1, atoms2, coefs2, alpha)
 
     return atoms, coefs
 
@@ -114,7 +120,7 @@ def update(atoms: Atoms, coefs: Coefs, grad, f):
     grad_Piv = np.array(
         [
             2 * coef * atom.calc_grad_ei(grad)
-            + grad.dot(atom.calc_sig_term()) * atom.e**2
+            + grad.dot(atom.calc_sig_term()) * (atom.e**2)
             for coef, atom in zip(coefs, atoms)
         ]
     ).T
@@ -122,31 +128,14 @@ def update(atoms: Atoms, coefs: Coefs, grad, f):
     # Convert argmin to one-hot matrix
     min_indices = np.argmin(grad_Piv, axis=1)
     new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    # alpha = config.optimizer.lr
-    # Piv = (1 - alpha) * Piv + alpha * new_Piv
-    # Piv, alpha = line_search(Piv, new_Piv, atoms, coefs, f)
     new_E, new_c = Piv2EC(new_Piv)
-    # coefs.update_coefficients(c)
     new_coefs = Coefs(new_c)
     new_atoms = Atoms()
     for idx, atom in enumerate(atoms):
         new_atom = GraphAtom()
         new_atom.set_params(new_E[:, idx], atom.R, atom.b)
-        # atom.e = E[:, idx]
-        grad_bi = new_atom.calc_grad_bi(grad)
-        new_b = np.zeros(atom.b.shape[-1], dtype=float)
-        new_b[np.argmin(grad_bi)] = 1
-        # atom.b = (1 - alpha) * atom.b + alpha * new_b
-
-        grad_Ri = new_atom.calc_grad_Ri(grad)
-        S, U = np.linalg.eigh(grad_Ri)
-        mask1 = S < 0
-        S[mask1] = config.rho_max
-        S[~mask1] = config.rho_min
-        new_R = U @ np.diag(S) @ U.T
-        # atom.R = (1 - alpha) * atom.R + alpha * new_R
-        # atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
-        new_atom.set_params(new_E[:, idx], new_R, new_b)
+        new_atom.update_R(grad)
+        new_atom.update_b(grad)
         new_atoms.add_atom(new_atom)
 
     atoms, coefs = line_search2(atoms, coefs, new_atoms, new_coefs, f)
@@ -175,6 +164,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     f_opt = f(opt_sig)
 
     f_sig = f(sig)
+    f_old = 0
 
     # if log_results:
     bar = tqdm(total=config.iters, leave=False)
@@ -222,6 +212,10 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         accuracies.append(acc)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
         components.append([L_term, R_term, pi_term])
+
+        # if np.abs(f_sig - f_old) < 1e-6:
+        #     break
+        # f_old = f_sig
 
     atoms, coefs = map_to_simplex(atoms, coefs)
 

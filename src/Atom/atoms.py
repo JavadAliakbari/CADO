@@ -40,19 +40,49 @@ class Atoms:
 
     def __mul__(self, c):
         atoms = Atoms()
-        for atom1 in self.atoms:
-            atom = atom1 * c
-            atoms.add_atom(atom)
+        if isinstance(c, (int, float)):  # Check if c is a scalar
+            for atom1 in self.atoms:
+                atom = atom1 * c
+                atoms.add_atom(atom)
+        elif isinstance(
+            c, (list, np.ndarray, Coefs)
+        ):  # Check if c is a list or np.array
+            if len(c) != len(self.atoms):
+                raise ValueError("Length of c must match the number of atoms.")
+            for atom1, ci in zip(self.atoms, c):
+                atom = atom1 * ci
+                atoms.add_atom(atom)
+        else:
+            raise TypeError("c must be a scalar, list, or numpy array.")
 
         return atoms
 
     def __rmul__(self, c):
         atoms = Atoms()
-        for atom1 in self.atoms:
-            atom = atom1 * c
-            atoms.add_atom(atom)
+        if isinstance(c, (int, float)):  # Check if c is a scalar
+            for atom1 in self.atoms:
+                atom = atom1 * c
+                atoms.add_atom(atom)
+        elif isinstance(
+            c, (list, np.ndarray, Coefs)
+        ):  # Check if c is a list or np.array
+            if len(c) != len(self.atoms):
+                raise ValueError("Length of c must match the number of atoms.")
+            for atom1, ci in zip(self.atoms, c):
+                atom = atom1 * ci
+                atoms.add_atom(atom)
+        else:
+            raise TypeError("c must be a scalar, list, or numpy array.")
 
         return atoms
+
+    # def __rmul__(self, c):
+    #     atoms = Atoms()
+    #     for atom1 in self.atoms:
+    #         atom = atom1 * c
+    #         atoms.add_atom(atom)
+
+    #     return atoms
 
     def shuffle(self):
         np.random.shuffle(self.atoms)
@@ -78,7 +108,5 @@ class Atoms:
         sig: Sig = sum(
             [c * atom.calc_sig_term() for atom, c in zip(self.atoms, coefs.get_coefs())]
         )
-
-        # sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
 
         return sig

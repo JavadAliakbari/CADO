@@ -8,10 +8,7 @@ from utils.utils import *
 
 def Piv2EC(Piv):
     c = np.sum(Piv, axis=0)
-    # n = Piv.shape[0]
     E2 = Piv / (c[None, :] + 1e-10)
-    # idx = c == 0
-    # E2[:, idx] = np.full((n, np.sum(idx)), 1 / n)
     E = np.sqrt(E2)
 
     return E, c
@@ -24,6 +21,15 @@ def map_to_simplex(atoms: Atoms, coefs: Coefs):
     coefs.update_coefficients(c)
     for idx, atom in enumerate(atoms):
         atom.e = E[:, idx]
+
+    return atoms, coefs
+
+
+def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
+    coefs = (1 - alpha) * coefs1 + alpha * coefs2
+    alpha_i = alpha * coefs2 / coefs
+    atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
+    # # # atoms, coefs = map_to_simplex(atoms, coefs)
 
     return atoms, coefs
 
@@ -52,9 +58,11 @@ def update(atoms: Atoms, coefs: Coefs, grad):
         new_atom.update_b(grad)
         new_atoms.add_atom(new_atom)
 
-    atoms = (1 - alpha) * atoms + alpha * new_atoms
-    coefs = (1 - alpha) * coefs + alpha * new_coefs
-    # atoms, coefs = map_to_simplex(atoms, coefs)
+    atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
+    # for idx, atom in enumerate(atoms):
+    #     atom.update_R(grad)
+    #     atom.update_b(grad)
+
     return atoms, coefs
 
 

@@ -253,10 +253,10 @@ class GraphAtom(Atom):
         self.b = np.zeros(grad.pi.shape[-1], dtype=float)
         self.b[np.argmin(a)] = 1
 
-    def __add__(self, atom):
-        e = np.sqrt(self.e**2 + atom.e**2)
-        R = self.R + atom.R
-        b = self.b + atom.b
+    def __add__(self, atom_):
+        e = np.sqrt(self.e**2 + atom_.e**2)
+        R = self.R + atom_.R
+        b = self.b + atom_.b
         R = project_to_psd_cone(R, config.rho_min, config.rho_max)
 
         atom = GraphAtom()
