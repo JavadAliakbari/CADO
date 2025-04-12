@@ -11,11 +11,7 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [
-        1000,
-        1000,
-        1000,
-    ]  # Number of training samples in each cluster
+    samples_per_cluster = [300, 300, 300]  # Number of training samples in each cluster
     # samples_per_cluster = [600, 400, 200]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
     num_signal_features = 2

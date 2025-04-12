@@ -33,8 +33,7 @@ class GraphFunc(f):
     def calc_L(self, signal: GraphSig):
         normalizer = signal.n if config.normalize else 1
         if config.Abar:
-
-            L_term = -matrix_dot_product(self.graph.Abar, signal.L) / normalizer
+            L_term = -matrix_dot_product(signal.L, self.graph.Abar) / normalizer
         else:
             r = self.graph.A - signal.L
             L_term = 0.5 * matrix_dot_product(r, r) / normalizer
@@ -69,8 +68,8 @@ class GraphFunc(f):
     def calc_pi(self, signal: GraphSig):
         normalizer = signal.c if config.normalize else 1
         if self.mu2 != 0:
-            train_labels = self.graph.y[self.graph.train_mask]
-            train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
+            train_labels = self.graph.train_labels
+            train_nodes = self.graph.train_nodes
             term_4 = np.sum(signal.pi[train_nodes, train_labels]) / normalizer
         else:
             term_4 = 0
@@ -80,10 +79,13 @@ class GraphFunc(f):
     def calc_cov(self):
         return self.graph.cov
 
-    def calc_grad(self, signal) -> GraphSig:
+    def calc_grad(self, signal, need_L=True) -> GraphSig:
         if signal is None:
             return 0
-        grad_L = self.calc_grad_L(signal)
+        if need_L:
+            grad_L = self.calc_grad_L(signal)
+        else:
+            grad_L = None
         grad_R = self.calc_grad_R(signal)
         grad_pi = self.grad_pi
         grad = GraphSig(grad_L, grad_R, grad_pi)
@@ -126,8 +128,8 @@ class GraphFunc(f):
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
         )
-        train_labels = self.graph.y[self.graph.train_mask]
-        train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
+        train_labels = self.graph.train_labels
+        train_nodes = self.graph.train_nodes
         gradient_pi[train_nodes, train_labels] = 1
         gradient_pi /= np.sum(gradient_pi, axis=0)[None, :]
 

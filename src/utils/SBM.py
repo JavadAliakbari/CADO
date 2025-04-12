@@ -1,9 +1,53 @@
 import numpy as np
 import networkx as nx
+import scipy.sparse as sp
 
 from utils.graph import Graph
 from subspace_clustring import generate_cluster_data
 from utils.utils import *
+
+
+# Add scalar multiplication support for SparseAbar objects.
+class SparseAbar:
+    def __init__(self, A, scale=1):
+        # Convert dense A to sparse CSR format.
+        if not sp.issparse(A):
+            self.A = sp.csr_matrix(A)
+        else:
+            self.A = A
+        self.shape = self.A.shape
+        self.scale = scale
+
+    def __matmul__(self, v):
+        # Compute: scale * (2*A.dot(v) - np.sum(v)*ones)
+        res = 2 * self.scale * self.A.dot(v)
+        res -= self.scale * np.sum(v) * np.ones(self.shape[0])
+        return res
+
+    def __rmatmul__(self, v):
+        # Compute v @ Abar.
+        res = 2 * self.scale * (v.dot(self.A))
+        res -= self.scale * np.sum(v) * np.ones(self.shape[1])
+        return res
+
+    def __mul__(self, c):
+        if isinstance(c, (int, float)):
+            return SparseAbar(self.A, self.scale * c)
+        return NotImplemented
+
+    def __rmul__(self, c):
+        return self.__mul__(c)
+
+    def __truediv__(self, c):
+        if isinstance(c, (int, float)):
+            return SparseAbar(self.A, self.scale / c)
+        return NotImplemented
+
+    def __rtruediv__(self, c):
+        return self.__truediv__(c)
+
+    def __neg__(self):
+        return SparseAbar(self.A, -self.scale)
 
 
 class SBM(Graph):
@@ -38,6 +82,9 @@ class SBM(Graph):
             np.einsum("ij,ik->ijk", self.X, self.X)
             # - config.rho_min * np.eye(self.num_features)[None, :]
         )
+
+        self.train_labels = self.y[self.train_mask]
+        self.train_nodes = np.arange(self.num_nodes)[self.train_mask]
 
     def create_partionioned_graph(self):
         """
@@ -84,10 +131,9 @@ class SBM(Graph):
         np.fill_diagonal(A, 1)
 
         D_inv_sqrt = np.diag(1.0 / np.sqrt(np.sum(A, axis=1)))
-        normalized_adj = D_inv_sqrt @ A @ D_inv_sqrt
+        # normalized_adj = D_inv_sqrt @ A @ D_inv_sqrt
 
-        Abar = A.copy()
-        Abar[Abar == 0] = -1
+        Abar = SparseAbar(A)
 
         eigenvalues, eigenvectors = np.linalg.eigh(A)
         top_indices = np.argsort(eigenvalues)[-K:]

@@ -480,16 +480,12 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     marks = np.array(["✔" if value else "✘" for value in mask])[:, None]
 
     # Temporarily remove terminal (stream) handlers to log only to file
-    stream_handlers = [
-        h for h in LOGGER.handlers if getattr(h, "stream", None) is not None
-    ]
-    for h in stream_handlers:
-        LOGGER.removeHandler(h)
+    h = LOGGER.handlers[0]
+    LOGGER.removeHandler(h)
     LOGGER.info(json.dumps(results, indent=4))
     LOGGER.info(np.hstack((np.round(sig.pi, 2), marks)))
     # Reattach terminal handlers
-    for h in stream_handlers:
-        LOGGER.addHandler(h)
+    LOGGER.addHandler(h)
 
     y_pred_test = y_pred[graph.test_mask]
     if y_pred_test.shape[0] > 0:

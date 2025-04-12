@@ -5,11 +5,16 @@ from utils.utils import *
 class GraphSig(Sig):
     def __init__(self, L, Rv, pi) -> None:
         super().__init__()
-        self.n = L.shape[0]
         self.c = pi.shape[-1]
         self.d = 0
 
-        self.L = L
+        if L is not None:
+            self.L = L
+            self.n = L.shape[0]
+        else:
+            self.L = None
+            self.n = 0
+
         if Rv is not None:
             self.d = Rv.shape[-1]
             eyes = np.eye(self.d)[None, :]
@@ -48,7 +53,7 @@ class GraphSig(Sig):
             L = self.L - sig.L
             Rv = self.Rv - sig.Rv
             pi = self.pi - sig.pi
-        else:
+        elif isinstance(sig, (int, float)):
             L = self.L - sig
             Rv = self.Rv - sig
             pi = self.pi - sig
@@ -56,11 +61,14 @@ class GraphSig(Sig):
         return sig
 
     def __mul__(self, c):
-        L = c * self.L
-        Rv = c * self.Rv
-        pi = c * self.pi
-        sig = GraphSig(L, Rv, pi)
-        return sig
+        if isinstance(c, (int, float)):
+            L = c * self.L
+            Rv = c * self.Rv
+            pi = c * self.pi
+            sig = GraphSig(L, Rv, pi)
+            return sig
+        elif isinstance(c, GraphSig):
+            return self.dot(c)
 
     def __rmul__(self, c):
         L = c * self.L
