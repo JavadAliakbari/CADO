@@ -63,15 +63,15 @@ class GraphAtom(Atom):
         if grad_sig is None:
             return 0
         grad_ei = self.calc_grad_ei(grad_sig)
-        grad_Ri = self.calc_grad_Ri(grad_sig)
-        grad_bi = self.calc_grad_bi(grad_sig)
+        grad_Ri = self.calc_grad_Ri(grad_sig.Rv)
+        grad_bi = self.calc_grad_bi(grad_sig.pi)
 
         grad = GraphAtom()
         grad.set_params(grad_ei, grad_Ri, grad_bi)
         return grad
 
     def calc_grad_ei(self, grad_sig: GraphSig):
-        if self.R is not None:
+        if self.R is not None and grad_sig.Rv is not None:
             tmp1 = np.einsum("ijk,jk->i", grad_sig.Rv, self.R)
         else:
             tmp1 = 0
@@ -83,13 +83,16 @@ class GraphAtom(Atom):
 
         return grad_ei
 
-    def calc_grad_Ri(self, grad_sig: GraphSig):
-        grad_Ri = np.einsum("ijk,i->jk", grad_sig.Rv, self.e**2)
+    def calc_grad_Ri(self, grad_Rv):
+        if grad_Rv is not None:
+            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2)
 
-        return grad_Ri
+            return grad_Ri
+        else:
+            return None
 
-    def calc_grad_bi(self, grad_sig: GraphSig):
-        grad_bi = np.einsum("i, ij-> j", self.e**2, grad_sig.pi)
+    def calc_grad_bi(self, grad_pi):
+        grad_bi = np.einsum("i, ij-> j", self.e**2, grad_pi)
 
         return grad_bi
 
@@ -128,24 +131,6 @@ class GraphAtom(Atom):
 
     def __str__(self):
         return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
-
-    def proximal_to_sig(self, sig: GraphSig):
-        λ, evecs_large = np.linalg.eigh(sig.L)
-        self.e = evecs_large[:, -1]
-        λ = λ[-1] - config.mu0 / config.beta
-        if λ < 0:
-            λ = 0
-            return λ
-
-        if config.mu1 != 0:
-            self.Ri = (np.einsum("ijk,i->jk", sig.Rv, self.e**2)) / λ
-            self.Ri = project_to_psd_cone(self.Ri, config.rho_min, config.rho_max)
-
-        if config.mu2 != 0:
-            self.b = np.einsum("i, ij-> j", self.e**2, sig.pi) / λ
-            self.b = project_to_simplex(self.b, 1)
-
-        return λ
 
     def conditional_gradient_update(self, grad: GraphSig, itr):
         """
@@ -227,8 +212,10 @@ class GraphAtom(Atom):
         return λ
 
     ## Step 2: Fix epsilon and b, update R
-    def update_R(self, grad: GraphSig, iter=0, itr=0):
-        grad_R = self.calc_grad_Ri(grad)
+    def update_R(self, grad_Rv, iter=0, itr=0):
+        if grad_Rv is None:
+            return
+        grad_R = self.calc_grad_Ri(grad_Rv)
 
         S, U = np.linalg.eigh(grad_R)
 
@@ -247,10 +234,14 @@ class GraphAtom(Atom):
         S[~mask1] = config.rho_min
         self.R = U @ np.diag(S) @ U.T
 
+        # S[mask1] = config.rho_max -  config.rho_min
+        # S[~mask1] = 0
+        # self.R = U @ np.diag(S) @ U.T + config.rho_min * np.eye(self.R.shape[0])
+
     ## Step 3: Fix epsilon and R, update b (closed-form solution)
-    def update_b(self, grad: GraphSig):
-        a = self.calc_grad_bi(grad)
-        self.b = np.zeros(grad.pi.shape[-1], dtype=float)
+    def update_b(self, grad_pi):
+        a = self.calc_grad_bi(grad_pi)
+        self.b = np.zeros(grad_pi.shape[-1], dtype=float)
         self.b[np.argmin(a)] = 1
 
     def __add__(self, atom_):

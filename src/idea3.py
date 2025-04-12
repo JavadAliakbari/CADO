@@ -8,6 +8,7 @@ from utils.utils import *
 
 def Piv2EC(Piv):
     c = np.sum(Piv, axis=0)
+    # n = Piv.shape[0]
     E2 = Piv / (c[None, :] + 1e-10)
     E = np.sqrt(E2)
 
@@ -34,7 +35,9 @@ def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
     return atoms, coefs
 
 
-def update(atoms: Atoms, coefs: Coefs, grad):
+def update(atoms: Atoms, coefs: Coefs, f):
+    sig = atoms.calc_sig(coefs)
+    grad = f.calc_grad(sig)
     # Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
     grad_Piv = np.array(
         [
@@ -54,14 +57,23 @@ def update(atoms: Atoms, coefs: Coefs, grad):
     for idx, atom in enumerate(atoms):
         new_atom = GraphAtom()
         new_atom.set_params(new_E[:, idx], atom.R, atom.b)
-        new_atom.update_R(grad)
-        new_atom.update_b(grad)
+        # new_atom.update_R(grad)
+        # new_atom.update_b(grad)
         new_atoms.add_atom(new_atom)
 
     atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
-    # for idx, atom in enumerate(atoms):
-    #     atom.update_R(grad)
-    #     atom.update_b(grad)
+    # sig = atoms.calc_sig(coefs)
+    # grad = f.calc_grad(sig)
+
+    for idx, (atom, coef) in enumerate(zip(atoms, coefs)):
+        grad_Ri = atom.calc_grad_Ri(grad.Rv)
+        atom.R -= alpha * 2 * coef * grad_Ri
+        atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
+        grad_bi = atom.calc_grad_bi(grad.pi)
+        atom.b -= alpha * 2 * coef * grad_bi
+        atom.b = project_to_simplex(atom.b, 1)
+        # atom.update_R(grad)
+        # atom.update_b(grad)
 
     return atoms, coefs
 
@@ -92,8 +104,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     components = []
 
     for ii in range(config.iters):
-        grad = f.calc_grad(sig)
-        atoms, coefs = update(atoms, coefs, grad)
+        atoms, coefs = update(atoms, coefs, f)
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)

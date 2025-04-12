@@ -5,10 +5,15 @@ from utils.utils import *
 
 
 class GraphFunc(f):
-    def __init__(self, graph: Graph, mu1=config.mu1, mu2=config.mu2) -> None:
+    def __init__(
+        self, graph: Graph, mu0=config.mu0, mu1=config.mu1, mu2=config.mu2
+    ) -> None:
         self.graph: Graph = graph
+        self.mu0 = mu0
         self.mu1 = mu1
         self.mu2 = mu2
+
+        self.grad_pi = self.calc_grad_pi()
 
     def __call__(self, signal: GraphSig, components=False):
         if signal is None:
@@ -34,22 +39,27 @@ class GraphFunc(f):
             r = self.graph.A - signal.L
             L_term = 0.5 * matrix_dot_product(r, r) / normalizer
 
-        return L_term
+        return self.mu0 * L_term
 
     def calc_R(self, signal: GraphSig):
-        # term2
-        normalizer = signal.d if config.normalize else 1
+        normalizer = signal.d**2 if config.normalize else 1
         if self.mu1 != 0:
-            if signal.Rv_inv is None:
-                signal.calc_Rv_inv()
-            # tt = np.einsum("ij,ijk->ik", self.graph.X, signal.Rv_inv)
-            # term_2 = matrix_dot_product(tt, self.graph.X)
-            # term_2 = np.trace(self.graph.cov @ signal.Rv_inv)
-            term_2 = np.einsum("ijk,ijk->", self.graph.cov, signal.Rv_inv) / normalizer
+            batch_size = 512
+            n = signal.Rv.shape[0]
+            d = signal.Rv.shape[-1]
+            term_2_val = 0
+            for start in range(0, n, batch_size):
+                end = start + batch_size
+                batch_Rv = signal.Rv[start:end]
+                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
+                batch_Rv_inv = np.linalg.solve(batch_Rv, I_batch)
+                batch_cov = self.graph.cov[start:end]
+                term_2_val += np.einsum("ijk,ijk->", batch_cov, batch_Rv_inv)
+            term_2 = term_2_val / normalizer
 
-            # term3
-            # term_3 = np.sum(np.log(np.linalg.det(signal.Rv))) / normalizer
-            term_3 = np.trace(np.sum(signal.Rv, axis=0)) / normalizer
+            # Use slogdet to compute term_3
+            _, logdet = np.linalg.slogdet(signal.Rv)
+            term_3 = np.sum(logdet) / normalizer
         else:
             term_2 = 0
             term_3 = 0
@@ -57,7 +67,6 @@ class GraphFunc(f):
         return self.mu1 * term_2 + self.mu1 * term_3
 
     def calc_pi(self, signal: GraphSig):
-        # term4
         normalizer = signal.c if config.normalize else 1
         if self.mu2 != 0:
             train_labels = self.graph.y[self.graph.train_mask]
@@ -76,42 +85,50 @@ class GraphFunc(f):
             return 0
         grad_L = self.calc_grad_L(signal)
         grad_R = self.calc_grad_R(signal)
-        grad_pi = self.calc_grad_pi(signal)
+        grad_pi = self.grad_pi
         grad = GraphSig(grad_L, grad_R, grad_pi)
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        normalizer = signal.n * config.p if config.normalize else 1
+        normalizer = signal.n * (config.p) * (1 - config.q) if config.normalize else 1
 
         if config.Abar:
-            return (-self.graph.Abar) / normalizer
+            return self.mu0 * (-self.graph.Abar) / normalizer
         else:
-            return (-self.graph.A + signal.L) / normalizer
+            return self.mu0 * (-self.graph.A + signal.L) / normalizer
 
     def calc_grad_R(self, signal: GraphSig):
-        normalizer = signal.d if config.normalize else 1
-        # Second block: Gradient with respect to Rv_matrices
-        if signal.Rv_inv is None:
-            signal.calc_Rv_inv()
+        normalizer = signal.d**2 if config.normalize else 1
+        if self.mu1 != 0:
+            d = signal.Rv.shape[-1]
+            n = signal.Rv.shape[0]
 
-        gradient_Rv = np.eye(signal.d)[None, :] - np.einsum(
-            "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
+            batch_size = 512
+
+            gradient_Rv = np.empty_like(signal.Rv)
+            for start in range(0, n, batch_size):
+                end = start + batch_size
+                batch_Rv = signal.Rv[start:end]
+                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
+                X = np.linalg.solve(batch_Rv, I_batch)
+                cov_batch = self.graph.cov[start:end]
+                Y = np.matmul(cov_batch, X)
+                X2 = np.linalg.solve(batch_Rv, Y)
+                gradient_Rv[start:end] = X - X2
+            return self.mu1 * gradient_Rv / normalizer
+        else:
+            return None
+
+    def calc_grad_pi(self):
+        normalizer = (
+            self.graph.num_classes * config.train_ratio if config.normalize else 1
         )
-        # gradient_Rv = signal.Rv_inv - np.einsum(
-        #     "ijk,ikm,imn->ijn", signal.Rv_inv, self.graph.cov, signal.Rv_inv
-        # )
-
-        return self.mu1 * gradient_Rv / normalizer
-
-    def calc_grad_pi(self, signal):
-        normalizer = signal.c * config.train_ratio if config.normalize else 1
-        # Third block: Gradient with respect to pi_kv
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
-        )  # Assuming labels are zero-indexed and y.max() gives the highest class index
-        # Create a one-hot encoded matrix
+        )
         train_labels = self.graph.y[self.graph.train_mask]
         train_nodes = np.arange(self.graph.num_nodes)[self.graph.train_mask]
         gradient_pi[train_nodes, train_labels] = 1
+        gradient_pi /= np.sum(gradient_pi, axis=0)[None, :]
 
         return -self.mu2 * gradient_pi / normalizer

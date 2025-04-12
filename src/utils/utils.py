@@ -10,6 +10,8 @@ from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
+import plotly.graph_objects as go
+from sklearn.decomposition import PCA
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
@@ -24,10 +26,10 @@ config = Config(config_path)
 
 plot = os.environ.get("PLOT") == "True"
 
-plt.rcParams["figure.figsize"] = [9, 6]
+plt.rcParams["figure.figsize"] = [16, 9]
 plt.rcParams["figure.dpi"] = 250  # 200 e.g. is really fine, but slower
 plt.rcParams.update({"figure.max_open_warning": 0})
-plt.rcParams["font.size"] = 10
+plt.rcParams["font.size"] = 15
 
 
 now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -355,30 +357,102 @@ def plot_adj(A, name="L"):
     # Save the image with a specific DPI (dots per inch) to control the output size
     plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection="3d")
 
-    # x, y = np.meshgrid(range(A.shape[0]), range(A.shape[1]))
-    # # z = np.zeros_like(A)
+def visualize_high_dim_data(
+    X,
+    predicted_clusters,
+    true_clusters,
+    subspaces,
+    centers=None,
+    filename="3d_plot.html",
+):
+    if centers is None:
+        centers = [np.zeros(X.shape[1]) for _ in range(len(subspaces))]
 
-    # ax.plot_surface(
-    #     x,
-    #     y,
-    #     A,
-    #     # facecolors=plt.cm.viridis(A),
-    #     # rstride=1,
-    #     # cstride=1,
-    #     # antialiased=False,
-    #     # shade=False,
-    # )
+    # Project data into 3 dimensions using PCA.
+    pca = PCA(n_components=3)
+    X_3d = pca.fit_transform(X)
 
-    # # ax.set_zlim(0, 1)
-    # # ax.set_xlabel("X axis")
-    # # ax.set_ylabel("Y axis")
-    # # ax.set_zlabel("Z axis")
+    # Project subspace lines
+    k = len(centers)
+    t_vals = np.linspace(-3, 3, 1000)
+    subspace_lines_3d = []
+    for j in range(k):
+        center = centers[j]
+        basis = subspaces[j][:, 0]  # assuming subspace dim = 1
+        line_points = np.array([center + t * basis for t in t_vals])
+        line_points_3d = pca.transform(line_points)
+        subspace_lines_3d.append(line_points_3d)
 
-    # plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
-    # # plt.show()
+    # Calculate opacity based on prediction correctness
+    correct_mask = predicted_clusters == true_clusters
+    opacities = np.where(
+        correct_mask, 0.9, 0.3
+    )  # Higher opacity for correct, lower for incorrect
+
+    # Colors
+    colors = ["red", "green", "blue", "cyan", "magenta", "yellow", "black"]
+
+    # Start Plotly figure
+    fig = go.Figure()
+
+    # Add cluster scatter plots
+    for j in range(k):
+        idx_correct = (predicted_clusters == j) & (predicted_clusters == true_clusters)
+        idx_incorrect = (predicted_clusters == j) & (
+            predicted_clusters != true_clusters
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=X_3d[idx_correct, 0],
+                y=X_3d[idx_correct, 1],
+                z=X_3d[idx_correct, 2],
+                mode="markers",
+                marker=dict(
+                    size=3,
+                    color=colors[j % len(colors)],
+                    opacity=0.3,  # Set opacity based on correctness
+                ),
+                name=f"Cluster {j}",
+            )
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=X_3d[idx_incorrect, 0],
+                y=X_3d[idx_incorrect, 1],
+                z=X_3d[idx_incorrect, 2],
+                mode="markers",
+                marker=dict(
+                    size=3,
+                    color=colors[j % len(colors)],
+                    opacity=0.9,  # Set opacity based on correctness
+                ),
+                name=f"Cluster {j}",
+            )
+        )
+
+    # Add subspace lines
+    for j in range(k):
+        line_points = subspace_lines_3d[j]
+        fig.add_trace(
+            go.Scatter3d(
+                x=line_points[:, 0],
+                y=line_points[:, 1],
+                z=line_points[:, 2],
+                mode="lines",
+                line=dict(color=colors[j % len(colors)], width=4),
+                name=f"Subspace {j}",
+            )
+        )
+
+    fig.update_layout(
+        title="Clusters and their projected subspaces (via PCA)",
+        scene=dict(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3"),
+    )
+
+    # Save as interactive HTML
+    fig.write_html(f"{save_path}{filename}")
+    # print(f"Plot saved to {filename}")
 
 
 def log_results(atoms, coefs, graph, results, save_path, terminal=True):
@@ -389,7 +463,6 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
         save_path=save_path,
         terminal=terminal,
     )
-    sig = atoms.calc_sig(coefs)
     results = {
         f"atom {id}": {
             "e": str(np.round(atom.e, 2)),
@@ -400,16 +473,24 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
         for id, (c, atom) in enumerate(zip(coefs, atoms))
     }
 
-    mask = np.argmax(sig.pi, axis=1) == graph.y
+    sig = atoms.calc_sig(coefs)
+    y_pred = np.argmax(sig.pi, axis=1)
+    mask = y_pred == graph.y
     # Replace True with ✔ and False with ✘
     marks = np.array(["✔" if value else "✘" for value in mask])[:, None]
 
+    # Temporarily remove terminal (stream) handlers to log only to file
+    stream_handlers = [
+        h for h in LOGGER.handlers if getattr(h, "stream", None) is not None
+    ]
+    for h in stream_handlers:
+        LOGGER.removeHandler(h)
     LOGGER.info(json.dumps(results, indent=4))
     LOGGER.info(np.hstack((np.round(sig.pi, 2), marks)))
+    # Reattach terminal handlers
+    for h in stream_handlers:
+        LOGGER.addHandler(h)
 
-    plot_adj(sig.L)
-
-    y_pred = np.argmax(sig.pi, axis=1)
     y_pred_test = y_pred[graph.test_mask]
     if y_pred_test.shape[0] > 0:
         acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
@@ -423,13 +504,19 @@ def plot_results(
     f_values,
     accuracies,
     atoms,
+    coefs,
+    graph,
     epsilons,
     components,
     save_path,
-    Lambda_norms=None,
-    f_opt=None,
+    *opt_params,
 ):
     os.makedirs(save_path, exist_ok=True)
+    sig = atoms.calc_sig(coefs)
+    plot_adj(sig.L)
+
+    f_opt, L_opt, R_opt, pi_opt = opt_params
+
     plt.figure()
     plt.plot(f_values)
     plt.title("Loss")
@@ -442,26 +529,48 @@ def plot_results(
     L = [component[0] for component in components]
     R = [component[1] for component in components]
     pi = [component[2] for component in components]
+    plt.plot(L, label="L", color="b")
+    plt.plot(R, label="R", color="r")
+    plt.plot(pi, label="pi", color="orange")
+    plt.plot(f_values, label="f", color="black")
+    plt.title("Loss")
+    plt.legend()
+    # plt.ylim(min(f_values[100:]) - 1, max(f_values[100:]) + 1)
+    plt.hlines(L_opt, 0, len(f_values), colors="b", linestyles="--")
+    plt.hlines(R_opt, 0, len(f_values), colors="r", linestyles="--")
+    plt.hlines(pi_opt, 0, len(f_values), colors="orange", linestyles="--")
+    plt.hlines(f_opt, 0, len(f_values), colors="black", linestyles="--")
+    # plt.yscale("log")
+    plt.savefig(f"{save_path}loss2.png")
+    plt.figure()
+    min_L = np.min(L)
+    L = np.array(L) - min_L
+    min_R = np.min(R)
+    R = np.array(R) - min_R
+    min_pi = np.min(pi)
+    pi = np.array(pi) - min_pi
+    min_f = np.min(f_values)
+    f = np.array(f_values) - min_f
     plt.plot(L, label="L")
     plt.plot(R, label="R")
     plt.plot(pi, label="pi")
-    plt.plot(f_values, label="f")
+    plt.plot(f, label="f")
     plt.title("Loss")
     plt.yscale("log")
     plt.legend()
     # plt.ylim(min(f_values[100:]) - 1, max(f_values[100:]) + 1)
     plt.hlines(f_opt, 0, len(f_values), colors="r", linestyles="--")
     # plt.yscale("log")
-    plt.savefig(f"{save_path}loss2.png")
+    plt.savefig(f"{save_path}loss3.png")
+
+    y_pred = np.argmax(sig.pi, axis=1)
+    Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
+    visualize_high_dim_data(graph.X, y_pred, graph.y, Q)
+
     plt.figure()
     plt.plot(accuracies)
     plt.title("Accuracy")
     plt.savefig(f"{save_path}accuracies.png")
-    if Lambda_norms is not None:
-        plt.figure()
-        plt.plot(Lambda_norms)
-        plt.title("Lambda norms")
-        plt.savefig(f"{save_path}Lambda_norms.png")
 
     plt.figure()
     for id, atom in enumerate(atoms):
@@ -479,6 +588,7 @@ def plot_results(
     def update(frame):
         ax.clear()
         for id, e in enumerate(epsilons[frame]):
+            # atom_id = np.argmax(graph.b[id])
             ax.plot(e, "*", label=f"atom {id}")
         ax.legend(loc="lower right")
         ax.set_title(f"Eigenvectors_{frame} acc: {accuracies[frame]:.2f}")

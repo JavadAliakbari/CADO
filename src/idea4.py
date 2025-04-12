@@ -53,7 +53,7 @@ def line_search2(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
     """
 
     alpha_low = 0
-    alpha_high = 0.1
+    alpha_high = 0.2
 
     atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
     sig_low = atoms_low.calc_sig(coefs_low)
@@ -115,7 +115,9 @@ def map_to_simplex(atoms: Atoms, coefs: Coefs):
     return atoms, coefs
 
 
-def update(atoms: Atoms, coefs: Coefs, grad, f):
+def update(atoms: Atoms, coefs: Coefs, f):
+    sig = atoms.calc_sig(coefs)
+    grad = f.calc_grad(sig)
     # Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
     grad_Piv = np.array(
         [
@@ -131,11 +133,15 @@ def update(atoms: Atoms, coefs: Coefs, grad, f):
     new_E, new_c = Piv2EC(new_Piv)
     new_coefs = Coefs(new_c)
     new_atoms = Atoms()
-    for idx, atom in enumerate(atoms):
+    for idx, (atom, coef) in enumerate(zip(atoms, coefs)):
         new_atom = GraphAtom()
         new_atom.set_params(new_E[:, idx], atom.R, atom.b)
-        new_atom.update_R(grad)
-        new_atom.update_b(grad)
+        new_sig = sig - atom.calc_sig_term()
+        new_grad = f.calc_grad(new_sig)
+        grad_Rv = 2 * coef * new_grad.Rv
+        grad_pi = 2 * coef * new_grad.pi
+        new_atom.update_R(grad_Rv)
+        new_atom.update_b(grad_pi)
         new_atoms.add_atom(new_atom)
 
     atoms, coefs = line_search2(atoms, coefs, new_atoms, new_coefs, f)
@@ -174,19 +180,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     components = []
     # coefs.update_coefficients(coefs_opt.get_coefs())
     for ii in range(config.iters):
-        # grad_atoms = []
-        # for ind in range(num_atoms):
-        sig = atoms.calc_sig(coefs)  # Update signal
-        grad = f.calc_grad(sig)
-        # grad_atom = atoms[ind].calc_grad(grad)
-        # grad_atoms.append(grad_atom)
-        # grad_atoms = np.array(grad_atoms)
-
-        # grad_coefs = np.array(
-        #     [grad.dot(atom.calc_sig_term()) for atom in atoms]
-        # )  # Gradient of the function
-
-        atoms, coefs = update(atoms, coefs, grad, f)
+        atoms, coefs = update(atoms, coefs, f)
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)

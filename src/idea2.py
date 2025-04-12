@@ -40,8 +40,8 @@ def update(atoms: Atoms, coefs: Coefs, grad, optimizer):
     for idx, atom in enumerate(atoms):
         params[f"R{idx}"] = atom.R
         params[f"b{idx}"] = atom.b
-        gradients[f"R{idx}"] = 2 * coefs[idx] * atom.calc_grad_Ri(grad)
-        gradients[f"b{idx}"] = 2 * coefs[idx] * atom.calc_grad_bi(grad)
+        gradients[f"R{idx}"] = 2 * coefs[idx] * atom.calc_grad_Ri(grad.Rv)
+        gradients[f"b{idx}"] = 2 * coefs[idx] * atom.calc_grad_bi(grad.pi)
 
     # Use optimizer to update parameters
     updated_params = optimizer.step(params, gradients)

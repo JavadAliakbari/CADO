@@ -32,6 +32,7 @@ class SBM(Graph):
         self.rho_max = rho_max
 
         self.Ri_matrices, self.Rv_matrices, self.X = self.create_features()
+        self.X /= np.linalg.norm(self.X, axis=1)[:, None]
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)

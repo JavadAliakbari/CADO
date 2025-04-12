@@ -7,7 +7,7 @@ class GraphSig(Sig):
         super().__init__()
         self.n = L.shape[0]
         self.c = pi.shape[-1]
-        self.d = Rv.shape[-1]
+        self.d = 0
 
         self.L = L
         if Rv is not None:
@@ -21,22 +21,6 @@ class GraphSig(Sig):
 
         self.Rv_inv = None
         self.Rz = None
-
-    def calc_Rv_inv(self):
-        self.Rv_inv = np.array([invert_matrix(matrix) for matrix in self.Rv])
-
-    def solve_R(self, X):
-        # To store the final results
-        self.Rz = np.empty_like(X)
-        for i, (R, x) in enumerate(zip(self.Rv, X)):
-            # Solve R @ y = x for y, which gives y = R^{-1} @ x
-            try:
-                z = np.linalg.solve(R, x)
-                # z = np.linalg.lstsq(R, x, rcond=None)[0]
-            except:
-                z = x
-
-            self.Rz[i] = z
 
     def __add__(self, sig):
         if isinstance(sig, Sig):
@@ -94,7 +78,7 @@ class GraphSig(Sig):
         pi = self.pi / c
         sig = GraphSig(L, Rv, pi)
         return sig
-    
+
     def __rtruediv__(self, c):
         if isinstance(c, (int, float)):
             L = c / self.L

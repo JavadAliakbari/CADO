@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.metrics import adjusted_rand_score
 
-from idea3 import CANO
+from idea5 import CANO
 from load_atom import load_atom
 from utils.algorithm_utils_orig import *
 from utils.SBM import SBM
@@ -11,8 +11,12 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [300, 300, 300]  # Number of training samples in each cluster
-    # samples_per_cluster = [500, 300, 100]  # Number of training samples in each cluster
+    samples_per_cluster = [
+        1000,
+        1000,
+        1000,
+    ]  # Number of training samples in each cluster
+    # samples_per_cluster = [600, 400, 200]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
     num_signal_features = 2
     n = sum(samples_per_cluster)
@@ -21,8 +25,6 @@ if __name__ == "__main__":
 
     probs = np.full((c, c), config.q)
     np.fill_diagonal(probs, config.p)
-    # probs = np.eye(c)
-    config.tau = n
     graph = SBM(
         samples_per_cluster,
         probs,
@@ -49,12 +51,8 @@ if __name__ == "__main__":
     elif config.warm_start == "cluster":
         atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
     elif config.warm_start == "load":
-        path = "results/20250203_004544/"
+        path = "results/20250410_011326/"
         atoms, coefs, graph = load_atom(path)
-
-    sig = atoms.calc_sig(coefs)
-    f = GraphFunc(graph=graph)
-    f_sc = f(sig)
 
     (
         atoms,
@@ -63,20 +61,23 @@ if __name__ == "__main__":
         results,
         f_values,
         accuracies,
-        f_opt,
         epsilsons,
         components,
+        opt_params,
     ) = CANO(graph, atoms, coefs, log_results=False)
 
     LOGGER = log_results(atoms, coefs, graph, results, save_path)
-    LOGGER.info(f"ARI: {ari}")
+    LOGGER.info(f"ARI: {ari:.4f}")
+    LOGGER.info(f"loss: {f_values[-1]:.4f}")
     plot_results(
         f_values,
         accuracies,
         atoms,
+        coefs,
+        graph,
         epsilsons,
         components,
         save_path,
-        f_opt=f_opt,
+        *opt_params,
     )
     save_model_params(atoms, coefs, graph, save_path)
