@@ -8,10 +8,8 @@ from utils.utils import *
 
 
 class Atoms:
-    def __init__(
-        self,
-    ) -> None:
-        self.atoms: List[Atom] = []
+    def __init__(self, atoms=None) -> None:
+        self.atoms: List[Atom] = atoms if atoms is not None else []
 
     def __len__(self):
         return len(self.atoms)

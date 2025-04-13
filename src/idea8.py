@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 from Graph_Atom.graph_func import GraphFunc
 from utils.Optimizer import get_optimizer
-from utils.algorithm_utils_orig import *
+from utils.algorithm_utils import *
 from utils.utils import *
 
 

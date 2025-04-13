@@ -2,7 +2,7 @@ import numpy as np
 from tqdm import tqdm
 
 from Graph_Atom.graph_func import GraphFunc
-from utils.algorithm_utils_orig import *
+from utils.algorithm_utils import *
 from utils.utils import *
 
 
@@ -68,6 +68,11 @@ def update(atoms: Atoms, coefs: Coefs, f, ii):
 
     atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
 
+    # Sort atoms and coefs based on np.argmax(atom.b)
+    sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
+    atoms = Atoms([atoms[i] for i in sort_indices])
+    coefs = Coefs([coefs[i] for i in sort_indices])
+
     return atoms, coefs
 
 
@@ -95,6 +100,21 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
     accuracies = []
     epsilsons = []
     components = []
+    y_preds = []
+    Qs = []
+
+    # Setup adaptive saving iterations for y_preds and Qs (max 200 saves)
+    # save_iters = set(
+    #     np.unique(
+    #         [
+    #             int(np.floor(np.exp(j / 199 * np.log(config.iters + 1))) - 1)
+    #             for j in range(200)
+    #         ]
+    #     )
+    # )
+    save_iters = np.linspace(
+        0, config.iters - 1, num=min(500, config.iters), dtype=int
+    ).tolist()
 
     for ii in range(config.iters):
         atoms, coefs = update(atoms, coefs, f, ii)
@@ -114,6 +134,8 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
             "acc": acc,
             "f_opt": f"{f_opt:,.4f}",
         }
+        y_pred = np.argmax(sig.pi, axis=1)
+        Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
 
         # if log_results:
         bar.set_postfix(results)
@@ -122,12 +144,14 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
         accuracies.append(acc)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
         components.append([L_term, R_term, pi_term])
+        # Change saving frequency using adaptive iterations
+        if ii in save_iters:
+            y_preds.append(y_pred)
+            Qs.append(Q)
 
         # if np.abs(f_sig - f_old) < 1e-6:
         #     break
         # f_old = f_sig
-
-    atoms, coefs = map_to_simplex(atoms, coefs)
 
     return (
         atoms,
@@ -139,4 +163,5 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
         epsilsons,
         components,
         (f_opt, L_opt, R_opt, pi_opt),
+        (y_preds, Qs),
     )

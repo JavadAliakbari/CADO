@@ -6,7 +6,7 @@ from subspace_clustring import (
     generate_cluster_data,
     visualize_high_dim_data2,
 )
-from utils.algorithm_utils_orig import *
+from utils.algorithm_utils import *
 from utils.utils import *
 
 # Set print options to show the entire array

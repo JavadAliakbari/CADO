@@ -3,7 +3,7 @@ from sklearn.metrics import adjusted_rand_score
 
 from idea5 import CANO
 from load_atom import load_atom
-from utils.algorithm_utils_orig import *
+from utils.algorithm_utils import *
 from utils.SBM import SBM
 from utils.utils import *
 
@@ -11,10 +11,10 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [300, 300, 300]  # Number of training samples in each cluster
-    # samples_per_cluster = [600, 400, 200]  # Number of training samples in each cluster
+    # samples_per_cluster = [500, 500, 500]  # Number of training samples in each cluster
+    samples_per_cluster = [600, 400, 200]  # Number of training samples in each cluster
     num_features = 6  # Dimension of the features at each node
-    num_signal_features = 2
+    num_signal_features = 2  # Number of signal features
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     n_clusters = c
@@ -60,6 +60,7 @@ if __name__ == "__main__":
         epsilsons,
         components,
         opt_params,
+        R_params,
     ) = CANO(graph, atoms, coefs, log_results=False)
 
     LOGGER = log_results(atoms, coefs, graph, results, save_path)
@@ -74,6 +75,8 @@ if __name__ == "__main__":
         epsilsons,
         components,
         save_path,
+        num_signal_features,
+        *R_params,
         *opt_params,
     )
     save_model_params(atoms, coefs, graph, save_path)

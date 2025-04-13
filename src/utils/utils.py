@@ -15,6 +15,7 @@ from sklearn.decomposition import PCA
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
+from utils.visualize_R import *
 
 seed = 4
 random.seed(seed)
@@ -358,103 +359,6 @@ def plot_adj(A, name="L"):
     plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
 
 
-def visualize_high_dim_data(
-    X,
-    predicted_clusters,
-    true_clusters,
-    subspaces,
-    centers=None,
-    filename="3d_plot.html",
-):
-    if centers is None:
-        centers = [np.zeros(X.shape[1]) for _ in range(len(subspaces))]
-
-    # Project data into 3 dimensions using PCA.
-    pca = PCA(n_components=3)
-    X_3d = pca.fit_transform(X)
-
-    # Project subspace lines
-    k = len(centers)
-    t_vals = np.linspace(-3, 3, 1000)
-    subspace_lines_3d = []
-    for j in range(k):
-        center = centers[j]
-        basis = subspaces[j][:, 0]  # assuming subspace dim = 1
-        line_points = np.array([center + t * basis for t in t_vals])
-        line_points_3d = pca.transform(line_points)
-        subspace_lines_3d.append(line_points_3d)
-
-    # Calculate opacity based on prediction correctness
-    correct_mask = predicted_clusters == true_clusters
-    opacities = np.where(
-        correct_mask, 0.9, 0.3
-    )  # Higher opacity for correct, lower for incorrect
-
-    # Colors
-    colors = ["red", "green", "blue", "cyan", "magenta", "yellow", "black"]
-
-    # Start Plotly figure
-    fig = go.Figure()
-
-    # Add cluster scatter plots
-    for j in range(k):
-        idx_correct = (predicted_clusters == j) & (predicted_clusters == true_clusters)
-        idx_incorrect = (predicted_clusters == j) & (
-            predicted_clusters != true_clusters
-        )
-        fig.add_trace(
-            go.Scatter3d(
-                x=X_3d[idx_correct, 0],
-                y=X_3d[idx_correct, 1],
-                z=X_3d[idx_correct, 2],
-                mode="markers",
-                marker=dict(
-                    size=3,
-                    color=colors[j % len(colors)],
-                    opacity=0.3,  # Set opacity based on correctness
-                ),
-                name=f"Cluster {j}",
-            )
-        )
-        fig.add_trace(
-            go.Scatter3d(
-                x=X_3d[idx_incorrect, 0],
-                y=X_3d[idx_incorrect, 1],
-                z=X_3d[idx_incorrect, 2],
-                mode="markers",
-                marker=dict(
-                    size=3,
-                    color=colors[j % len(colors)],
-                    opacity=0.9,  # Set opacity based on correctness
-                ),
-                name=f"Cluster {j}",
-            )
-        )
-
-    # Add subspace lines
-    for j in range(k):
-        line_points = subspace_lines_3d[j]
-        fig.add_trace(
-            go.Scatter3d(
-                x=line_points[:, 0],
-                y=line_points[:, 1],
-                z=line_points[:, 2],
-                mode="lines",
-                line=dict(color=colors[j % len(colors)], width=4),
-                name=f"Subspace {j}",
-            )
-        )
-
-    fig.update_layout(
-        title="Clusters and their projected subspaces (via PCA)",
-        scene=dict(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3"),
-    )
-
-    # Save as interactive HTML
-    fig.write_html(f"{save_path}{filename}")
-    # print(f"Plot saved to {filename}")
-
-
 def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     os.makedirs(save_path, exist_ok=True)
     LOGGER = getLOGGER(
@@ -505,6 +409,9 @@ def plot_results(
     epsilons,
     components,
     save_path,
+    num_sig_features,
+    y_preds,
+    Qs,
     *opt_params,
 ):
     os.makedirs(save_path, exist_ok=True)
@@ -561,7 +468,24 @@ def plot_results(
 
     y_pred = np.argmax(sig.pi, axis=1)
     Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
-    visualize_high_dim_data(graph.X, y_pred, graph.y, Q)
+
+    visualize_high_dim_data(
+        graph.X,
+        y_preds,
+        graph.y,
+        Qs,
+        num_sig_features=num_sig_features,
+        save_path=save_path,
+    )
+    visualize_high_dim_data2(
+        graph.X,
+        y_preds,
+        graph.y,
+        Qs,
+        num_sig_features=num_sig_features,
+        save_path=save_path,
+    )
+    # visualize_high_dim_data2(graph.X, y_pred, graph.y, Q)
 
     plt.figure()
     plt.plot(accuracies)

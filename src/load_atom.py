@@ -1,7 +1,7 @@
 import pickle as pkl
 
 from utils.utils import *
-from utils.algorithm_utils_orig import *
+from utils.algorithm_utils import *
 
 
 def load_atom(path):
@@ -19,6 +19,7 @@ def load_atom(path):
     config.tau = graph.num_nodes
 
     return atoms, coefs, graph
+
 
 if __name__ == "__main__":
     path = "results/20250119_221156/"
