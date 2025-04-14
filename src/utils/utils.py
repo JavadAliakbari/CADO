@@ -28,7 +28,7 @@ config = Config(config_path)
 plot = os.environ.get("PLOT") == "True"
 
 plt.rcParams["figure.figsize"] = [16, 9]
-plt.rcParams["figure.dpi"] = 250  # 200 e.g. is really fine, but slower
+plt.rcParams["figure.dpi"] = 100  # 200 e.g. is really fine, but slower
 plt.rcParams.update({"figure.max_open_warning": 0})
 plt.rcParams["font.size"] = 15
 
@@ -466,27 +466,6 @@ def plot_results(
     # plt.yscale("log")
     plt.savefig(f"{save_path}loss3.png")
 
-    y_pred = np.argmax(sig.pi, axis=1)
-    Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
-
-    visualize_high_dim_data(
-        graph.X,
-        y_preds,
-        graph.y,
-        Qs,
-        num_sig_features=num_sig_features,
-        save_path=save_path,
-    )
-    visualize_high_dim_data2(
-        graph.X,
-        y_preds,
-        graph.y,
-        Qs,
-        num_sig_features=num_sig_features,
-        save_path=save_path,
-    )
-    # visualize_high_dim_data2(graph.X, y_pred, graph.y, Q)
-
     plt.figure()
     plt.plot(accuracies)
     plt.title("Accuracy")
@@ -521,9 +500,27 @@ def plot_results(
     ani = FuncAnimation(fig, update, frames=frames, repeat=False)
 
     # Lower the resolution
-    dpi = 80  # Adjust the DPI as needed
+    dpi = 50  # Adjust the DPI as needed
 
     ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25), dpi=dpi)
+
+    visualize_high_dim_data(
+        graph.X,
+        y_preds,
+        graph.y,
+        Qs,
+        num_sig_features=num_sig_features,
+        save_path=save_path,
+    )
+    # visualize_high_dim_data2(
+    #     graph.X,
+    #     y_preds,
+    #     graph.y,
+    #     Qs,
+    #     num_sig_features=num_sig_features,
+    #     save_path=save_path,
+    # )
+    # visualize_high_dim_data2(graph.X, y_pred, graph.y, Q)
 
 
 def save_model_params(atoms, coefs, graph, save_path):

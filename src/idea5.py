@@ -1,5 +1,6 @@
 import numpy as np
 from tqdm import tqdm
+from scipy.special import softmax
 
 from Graph_Atom.graph_func import GraphFunc
 from utils.algorithm_utils import *
@@ -34,7 +35,50 @@ def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
     return atoms, coefs
 
 
-def update(atoms: Atoms, coefs: Coefs, f, ii):
+def schedule_lr(
+    ii,
+    max_iter=config.iters,
+    min_lr=config.optimizer.min,
+    max_lr=config.optimizer.lr,
+    warmup_steps=500,
+    decay_steps=config.optimizer.decay_steps,
+    decay_rate=config.optimizer.decay_rate,
+    method=config.optimizer.method,
+    # method="exponential",
+    # method="cosine",
+):
+    if method == "cosine":
+        lr = min_lr + 0.5 * (max_lr - min_lr) * (
+            1 + np.cos(np.pi * (ii - warmup_steps) / (max_iter - warmup_steps))
+        )
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+    elif method == "linear":
+        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+    elif method == "exponential":
+        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+        elif ii < max_iter - decay_steps:
+            lr = max_lr
+        else:
+            lr = max_lr + (min_lr - max_lr) * np.exp(
+                -decay_rate * (ii - max_iter + decay_steps)
+            )
+    return lr
+
+
+def update(
+    atoms: Atoms,
+    coefs: Coefs,
+    f,
+    ii,
+    prev_grad=None,
+    momentum_beta=0.9,
+    soft_assignment=True,
+):
     sig = atoms.calc_sig(coefs)
     grad = f.calc_grad(sig)
     # Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
@@ -45,27 +89,31 @@ def update(atoms: Atoms, coefs: Coefs, f, ii):
             for coef, atom in zip(coefs, atoms)
         ]
     ).T
+    # Apply momentum to gradient if we have previous gradient
+    if prev_grad is not None:
+        grad_Piv = momentum_beta * prev_grad + (1 - momentum_beta) * grad_Piv
+    grad_norm = np.linalg.norm(grad_Piv)
 
-    # Convert argmin to one-hot matrix
-    min_indices = np.argmin(grad_Piv, axis=1)
-    new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    alpha = config.optimizer.lr * (
-        config.optimizer.decay_rate ** (ii // config.optimizer.decay_steps)
-    )
-    alpha = max(alpha, config.optimizer.min)
+    if soft_assignment:
+        s = 10
+        temperature = max(1e-5, (1.0 - s * ii / config.iters)) * grad_norm
+        new_Piv = softmax(-grad_Piv / temperature, axis=1)
+    else:
+        # Convert argmin to one-hot matrix
+        min_indices = np.argmin(grad_Piv, axis=1)
+        new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
     new_E, new_c = Piv2EC(new_Piv)
 
     new_coefs = Coefs(new_c)
     new_atoms = deepcopy(atoms)
-    indices = np.arange(len(atoms))
-    np.random.shuffle(indices)
-    for idx in indices:
+    for idx in range(len(atoms)):
         new_atoms[idx].e = new_E[:, idx]
         new_sig = sig - new_atoms[idx].calc_sig_term()
         new_grad = f.calc_grad(new_sig, need_L=False)
         new_atoms[idx].update_R(new_grad.Rv)
         new_atoms[idx].update_b(new_grad.pi)
 
+    alpha = schedule_lr(ii)
     atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
 
     # Sort atoms and coefs based on np.argmax(atom.b)
@@ -73,7 +121,7 @@ def update(atoms: Atoms, coefs: Coefs, f, ii):
     atoms = Atoms([atoms[i] for i in sort_indices])
     coefs = Coefs([coefs[i] for i in sort_indices])
 
-    return atoms, coefs
+    return atoms, coefs, grad_Piv
 
 
 def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
@@ -92,6 +140,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
     f_opt, L_opt, R_opt, pi_opt = f(opt_sig, components=True)
 
     f_sig = f(sig)
+    prev_grad = None
 
     # if log_results:
     bar = tqdm(total=config.iters, leave=leave)
@@ -103,21 +152,13 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
     y_preds = []
     Qs = []
 
-    # Setup adaptive saving iterations for y_preds and Qs (max 200 saves)
-    # save_iters = set(
-    #     np.unique(
-    #         [
-    #             int(np.floor(np.exp(j / 199 * np.log(config.iters + 1))) - 1)
-    #             for j in range(200)
-    #         ]
-    #     )
-    # )
     save_iters = np.linspace(
-        0, config.iters - 1, num=min(500, config.iters), dtype=int
+        0, config.iters - 1, num=min(200, config.iters), dtype=int
     ).tolist()
 
     for ii in range(config.iters):
-        atoms, coefs = update(atoms, coefs, f, ii)
+        atoms, coefs, current_grad = update(atoms, coefs, f, ii, prev_grad)
+        prev_grad = current_grad
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)

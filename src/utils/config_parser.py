@@ -44,6 +44,7 @@ class Config:
                 "min": 0.0001,
                 "decay_rate": 0.95,
                 "decay_steps": 100,
+                "method": "linear",
             },
             "adam": {"beta1": 0.9, "beta2": 0.999, "epsilon": 1e-8},
             "sgd": {"momentum": 0.0},
@@ -78,3 +79,4 @@ class OptimizerConfig:
         self.beta2 = config["adam"]["beta2"]
         self.epsilon = config["adam"]["epsilon"]
         self.momentum = config["sgd"]["momentum"]
+        self.method = config["learning_rate"]["method"]

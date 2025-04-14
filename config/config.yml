@@ -1,12 +1,12 @@
-cogent_iters: 1000
+cogent_iters: 3000
 train_ratio: 0.2
 p: 0.1
 q: 0.05
 mu0: 0.4
-mu1: 1
+mu1: 1.0
 mu2: 5.5
-rho_min: 0.04                       
-rho_max: 100                            
+rho_min: 0.04                      
+rho_max: 1
 sig_rho_min: 0.04                     
 sig_rho_max: 100                           
 Abar: True
@@ -25,10 +25,11 @@ CGD: False
 optimizer:
   type: "sgd"  # Options: "adam", "sgd"
   learning_rate:
-    initial: 0.05 # Initial learning rate
-    min: 0.00000001    # Minimum learning rate
-    decay_rate: 0.97  # Decay rate for learning rate scheduling
+    initial: 0.01 # Initial learning rate
+    min: 0.000000001    # Minimum learning rate
+    decay_rate: 0.999  # Decay rate for learning rate scheduling
     decay_steps: 10   # Number of steps between learning rate updates
+    method: "cosine"  # Options: "exponential", "linear", "cosine", 
   adam:
     beta1: 0.9     # Exponential decay rate for first moment estimates
     beta2: 0.999   # Exponential decay rate for second moment estimates
