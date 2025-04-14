@@ -5,9 +5,7 @@ from utils.utils import *
 
 
 class GraphFunc(f):
-    def __init__(
-        self, graph: Graph, mu0=config.mu0, mu1=config.mu1, mu2=config.mu2
-    ) -> None:
+    def __init__(self, graph: Graph, mu0=data.mu0, mu1=data.mu1, mu2=data.mu2) -> None:
         self.graph: Graph = graph
         self.mu0 = mu0
         self.mu1 = mu1
@@ -31,8 +29,8 @@ class GraphFunc(f):
             return obj
 
     def calc_L(self, signal: GraphSig):
-        normalizer = signal.n if config.normalize else 1
-        if config.Abar:
+        normalizer = signal.n if algorithm.normalize else 1
+        if algorithm.Abar:
             L_term = -matrix_dot_product(signal.L, self.graph.Abar) / normalizer
         else:
             r = self.graph.A - signal.L
@@ -41,7 +39,7 @@ class GraphFunc(f):
         return self.mu0 * L_term
 
     def calc_R(self, signal: GraphSig):
-        normalizer = signal.d**2 if config.normalize else 1
+        normalizer = signal.d**2 if algorithm.normalize else 1
         if self.mu1 != 0:
             batch_size = 512
             n = signal.Rv.shape[0]
@@ -66,7 +64,7 @@ class GraphFunc(f):
         return self.mu1 * term_2 + self.mu1 * term_3
 
     def calc_pi(self, signal: GraphSig):
-        normalizer = signal.c if config.normalize else 1
+        normalizer = signal.c if algorithm.normalize else 1
         if self.mu2 != 0:
             train_labels = self.graph.train_labels
             train_nodes = self.graph.train_nodes
@@ -92,15 +90,15 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        normalizer = signal.n * (config.p) * (1 - config.q) if config.normalize else 1
+        normalizer = signal.n * (data.p) * (1 - data.q) if algorithm.normalize else 1
 
-        if config.Abar:
+        if algorithm.Abar:
             return self.mu0 * (-self.graph.Abar) / normalizer
         else:
             return self.mu0 * (-self.graph.A + signal.L) / normalizer
 
     def calc_grad_R(self, signal: GraphSig):
-        normalizer = signal.d**2 if config.normalize else 1
+        normalizer = signal.d**2 if algorithm.normalize else 1
         if self.mu1 != 0:
             d = signal.Rv.shape[-1]
             n = signal.Rv.shape[0]
@@ -123,7 +121,7 @@ class GraphFunc(f):
 
     def calc_grad_pi(self):
         normalizer = (
-            self.graph.num_classes * config.train_ratio if config.normalize else 1
+            self.graph.num_classes * data.train_ratio if algorithm.normalize else 1
         )
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float
@@ -134,3 +132,47 @@ class GraphFunc(f):
         gradient_pi /= np.sum(gradient_pi, axis=0)[None, :]
 
         return -self.mu2 * gradient_pi / normalizer
+
+    def update_mu0(self, new_mu1):
+        """Update the mu1 parameter value"""
+        self.mu1 = new_mu1
+
+    def calc_grad_mu0(self, signal: GraphSig):
+        """Calculate gradient of the function with respect to mu0"""
+        normalizer = signal.n if algorithm.normalize else 1
+        if algorithm.Abar:
+            L_term = -matrix_dot_product(signal.L, self.graph.Abar) / normalizer
+        else:
+            r = self.graph.A - signal.L
+            L_term = 0.5 * matrix_dot_product(r, r) / normalizer
+
+        return L_term  # The gradient is simply the L_term
+
+    def update_mu1(self, new_mu1):
+        """Update the mu1 parameter value"""
+        self.mu1 = new_mu1
+
+    def calc_grad_mu1(self, signal: GraphSig):
+        normalizer = signal.d**2 if algorithm.normalize else 1
+        if self.mu1 != 0:
+            batch_size = 512
+            n = signal.Rv.shape[0]
+            d = signal.Rv.shape[-1]
+            term_2_val = 0
+            for start in range(0, n, batch_size):
+                end = start + batch_size
+                batch_Rv = signal.Rv[start:end]
+                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
+                batch_Rv_inv = np.linalg.solve(batch_Rv, I_batch)
+                batch_cov = self.graph.cov[start:end]
+                term_2_val += np.einsum("ijk,ijk->", batch_cov, batch_Rv_inv)
+            term_2 = term_2_val / normalizer
+
+            # Use slogdet to compute term_3
+            _, logdet = np.linalg.slogdet(signal.Rv)
+            term_3 = np.sum(logdet) / normalizer
+        else:
+            term_2 = 0
+            term_3 = 0
+
+        return term_2 + term_3

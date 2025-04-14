@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 from tqdm import tqdm
 from scipy.special import softmax
@@ -7,43 +9,15 @@ from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def Piv2EC(Piv):
-    c = np.sum(Piv, axis=0)
-    E2 = Piv / (c[None, :] + 1e-10)
-    E = np.sqrt(E2)
-
-    return E, c
-
-
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    Piv = project_to_simplex(Piv, 1)
-    E, c = Piv2EC(Piv)
-    coefs.update_coefficients(c)
-    for idx, atom in enumerate(atoms):
-        atom.e = E[:, idx]
-
-    return atoms, coefs
-
-
-def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
-    coefs = (1 - alpha) * coefs1 + alpha * coefs2
-    alpha_i = alpha * coefs2 / coefs
-    atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
-    # # # atoms, coefs = map_to_simplex(atoms, coefs)
-
-    return atoms, coefs
-
-
 def schedule_lr(
     ii,
-    max_iter=config.iters,
-    min_lr=config.optimizer.min,
-    max_lr=config.optimizer.lr,
-    warmup_steps=500,
-    decay_steps=config.optimizer.decay_steps,
-    decay_rate=config.optimizer.decay_rate,
-    method=config.optimizer.method,
+    max_iter=algorithm.iters,
+    min_lr=optimizer.min,
+    max_lr=optimizer.lr,
+    warmup_steps=algorithm.warmup_steps,
+    decay_steps=optimizer.decay_steps,
+    decay_rate=optimizer.decay_rate,
+    method=optimizer.method,
     # method="exponential",
     # method="cosine",
 ):
@@ -76,18 +50,51 @@ def update(
     f,
     ii,
     prev_grad=None,
+    update_mu0=False,
+    mu0=None,
+    mu1=None,
+    update_mu1=False,
+    prev_mu0_grad=None,
+    prev_mu1_grad=None,
     momentum_beta=0.9,
     soft_assignment=True,
+    lr_search=True,
 ):
     sig = atoms.calc_sig(coefs)
     grad = f.calc_grad(sig)
-    # Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
+
+    if update_mu0:
+        grad_mu0 = f.calc_grad_mu0(sig)
+
+        if prev_mu0_grad is not None:
+            grad_mu0 = momentum_beta * prev_mu0_grad + (1 - momentum_beta) * grad_mu0
+        # Update mu0 using gradient descent
+        mu0_lr = schedule_lr(
+            ii, max_lr=1e-6, min_lr=1e-12, max_iter=algorithm.iters, method="cosine"
+        )  # Can use different learning rate schedule
+        # mu0_lr = 1e-6
+        new_mu0 = max(1e-4, mu0 - mu0_lr * grad_mu0)  # Ensure mu0 stays positive
+        f.update_mu0(new_mu0)
+    else:
+        new_mu0 = mu0
+        grad_mu0 = prev_mu0_grad
+
+    if update_mu1:
+        grad_mu1 = f.calc_grad_mu1(sig)
+        if prev_mu1_grad is not None:
+            grad_mu1 = momentum_beta * prev_mu1_grad + (1 - momentum_beta) * grad_mu1
+        mu1_lr = schedule_lr(
+            ii, max_lr=1e-6, min_lr=1e-12, max_iter=algorithm.iters, method="cosine"
+        )  # Can use different learning rate schedule
+        new_mu1 = max(1e-4, mu1 - mu1_lr * grad_mu1)  # Ensure mu1 stays positive
+        f.update_mu1(new_mu1)
+    else:
+        new_mu1 = mu1
+        grad_mu1 = prev_mu1_grad
+
+    # Continue with normal atom and coef updates
     grad_Piv = np.array(
-        [
-            coef * atom.calc_grad_ei(grad)
-            # + (atom.calc_sig_term() * grad) * (atom.e**2)
-            for coef, atom in zip(coefs, atoms)
-        ]
+        [coef * atom.calc_grad_ei(grad) for coef, atom in zip(coefs, atoms)]
     ).T
     # Apply momentum to gradient if we have previous gradient
     if prev_grad is not None:
@@ -95,8 +102,8 @@ def update(
     grad_norm = np.linalg.norm(grad_Piv)
 
     if soft_assignment:
-        s = 10
-        temperature = max(1e-5, (1.0 - s * ii / config.iters)) * grad_norm
+        s = algorithm.soft_assign_s
+        temperature = max(1e-5, (1.0 - s * ii / algorithm.iters)) * grad_norm
         new_Piv = softmax(-grad_Piv / temperature, axis=1)
     else:
         # Convert argmin to one-hot matrix
@@ -113,18 +120,30 @@ def update(
         new_atoms[idx].update_R(new_grad.Rv)
         new_atoms[idx].update_b(new_grad.pi)
 
-    alpha = schedule_lr(ii)
-    atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
+    if lr_search:
+        atoms, coefs = line_search(atoms, coefs, new_atoms, new_coefs, f)
+    else:
+        alpha = schedule_lr(ii)
+        atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
 
     # Sort atoms and coefs based on np.argmax(atom.b)
     sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
     atoms = Atoms([atoms[i] for i in sort_indices])
     coefs = Coefs([coefs[i] for i in sort_indices])
 
-    return atoms, coefs, grad_Piv
+    return atoms, coefs, grad_Piv, new_mu0, grad_mu0, new_mu1, grad_mu1
 
 
-def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
+def CANO(
+    graph,
+    atoms=None,
+    coefs=None,
+    mu0=None,
+    mu1=None,
+    lr_search=True,
+    log_results=True,
+    leave=True,
+):
     n = graph.num_nodes
     num_features = graph.num_features
     c = graph.num_clusters
@@ -133,17 +152,27 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
 
+    # Initialize mu0 if not provided
+    if mu0 is None:
+        mu0 = data.mu0
+    if mu1 is None:
+        mu1 = data.mu1
+
     atoms, coefs = map_to_simplex(atoms, coefs)
     sig = atoms.calc_sig(coefs)
+    # Initialize GraphFunc with the current mu0 value
+    f = GraphFunc(graph=graph, mu0=mu0, mu1=mu1)
+
     opt_sig = atoms_opt.calc_sig(coefs_opt)
-    f = GraphFunc(graph=graph)
     f_opt, L_opt, R_opt, pi_opt = f(opt_sig, components=True)
 
     f_sig = f(sig)
     prev_grad = None
+    prev_mu0_grad = None
+    prev_mu1_grad = None
 
     # if log_results:
-    bar = tqdm(total=config.iters, leave=leave)
+    bar = tqdm(total=algorithm.iters, leave=leave)
     f_old = 0
     f_values = [f_sig]
     accuracies = []
@@ -153,12 +182,27 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
     Qs = []
 
     save_iters = np.linspace(
-        0, config.iters - 1, num=min(200, config.iters), dtype=int
+        0, algorithm.iters - 1, num=min(200, algorithm.iters), dtype=int
     ).tolist()
 
-    for ii in range(config.iters):
-        atoms, coefs, current_grad = update(atoms, coefs, f, ii, prev_grad)
+    for ii in range(algorithm.iters):
+        atoms, coefs, current_grad, mu0, current_mu0_grad, mu1, current_mu1_grad = (
+            update(
+                atoms,
+                coefs,
+                f,
+                ii,
+                prev_grad,
+                mu0=mu0,
+                prev_mu0_grad=prev_mu0_grad,
+                mu1=mu1,
+                prev_mu1_grad=prev_mu1_grad,
+                lr_search=lr_search,
+            )
+        )
         prev_grad = current_grad
+        prev_mu0_grad = current_mu0_grad
+        prev_mu1_grad = current_mu1_grad
 
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
@@ -174,6 +218,8 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
             "f_opt": f"{f_opt:,.4f}",
+            # "mu0": f"{mu0:,.4f}",  # Add mu0 to results
+            # "mu1": f"{mu1:,.4f}",  # Add mu1 to results
         }
         y_pred = np.argmax(sig.pi, axis=1)
         Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
@@ -185,14 +231,16 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
         accuracies.append(acc)
         epsilsons.append([atoms.e.copy() for atoms in atoms])
         components.append([L_term, R_term, pi_term])
+
         # Change saving frequency using adaptive iterations
         if ii in save_iters:
             y_preds.append(y_pred)
             Qs.append(Q)
 
-        # if np.abs(f_sig - f_old) < 1e-6:
-        #     break
-        # f_old = f_sig
+        # early stopping condition
+        if ii > 100 and np.mean(np.abs(np.diff(f_values[-20:]))) < 1e-6:
+            print(f"Early stopping at iteration {ii} due to convergence")
+            break
 
     return (
         atoms,
@@ -205,4 +253,5 @@ def CANO(graph, atoms=None, coefs=None, log_results=True, leave=True):
         components,
         (f_opt, L_opt, R_opt, pi_opt),
         (y_preds, Qs),
+        # mu0_values,  # Return the mu0 values history
     )

@@ -123,16 +123,13 @@ class Coefs:
 
     def scale_coefficients(self, factor, id):
         # s = np.sum(self.coefs)
+        n = np.sum(self.coefs)
         for ind in range(len(self.coefs)):
             if ind == id:
                 self.coefs[ind] *= factor
             else:
                 self.coefs[ind] *= 1 - factor
-        # self.coefs[:-1] *= 1 - factor
-        # self.coefs[-1] *= factor
-        # [coef for ind, coef in enumerate(self.coefs) if coef < 0] = 0
 
-        self.coefs = project_to_simplex2(self, config.tau)
 
     def update_coefficients(self, coefs):
         if not isinstance(coefs, np.ndarray):

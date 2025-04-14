@@ -1,38 +1,40 @@
-cogent_iters: 3000
-train_ratio: 0.2
-p: 0.1
-q: 0.05
-mu0: 0.4
-mu1: 1.0
-mu2: 5.5
-rho_min: 0.04                      
-rho_max: 1
-sig_rho_min: 0.04                     
-sig_rho_max: 100                           
-Abar: True
-warm_start: "random"                  # "optimal" or "random" or "cluster"
-normalize: True
-local_iter: 1
-beta: 0.1
-iter_or_cycles_to_find_next_atom: 30
-GP_iters: 500
-GP_tol: 0.000001
-iner_iter_GA_R: 10000
-iner_step_GA_R: 0.01
-CGD: False
-
-# Optimizer configuration
+data:
+  samples_per_cluster: [300, 300, 300]  # Number of samples per cluster
+  # samples_per_cluster: [600, 400, 200]
+  num_features: 6
+  num_signal_features: 2
+  train_ratio: 0.2
+  p: 0.1
+  q: 0.05
+  mu0: 0.4
+  mu1: 1.0
+  mu2: 5.5
+  rho_min: 0.04                    
+  rho_max: 1.0
+  sig_rho_min: 0.04                    
+  sig_rho_max: 100    
+algorithm:
+  iters: 500                
+  warmup_steps: 500
+  momentum_beta: 0.9
+  mu_lr_max: 1e-6
+  mu_lr_min: 1e-12
+  min_mu: 1e-4
+  soft_assign_s: 10
+  Abar: True
+  warm_start: "random"                  # "optimal" or "random" or "cluster"
+  normalize: True
 optimizer:
   type: "sgd"  # Options: "adam", "sgd"
   learning_rate:
-    initial: 0.01 # Initial learning rate
+    initial: 0.5 # Initial learning rate
     min: 0.000000001    # Minimum learning rate
     decay_rate: 0.999  # Decay rate for learning rate scheduling
     decay_steps: 10   # Number of steps between learning rate updates
-    method: "cosine"  # Options: "exponential", "linear", "cosine", 
+    method: "linear"  # Options: "exponential", "linear", "cosine"
   adam:
-    beta1: 0.9     # Exponential decay rate for first moment estimates
-    beta2: 0.999   # Exponential decay rate for second moment estimates
-    epsilon: 0.00000001  # Small constant to prevent division by zero
+    beta1: 0.9     
+    beta2: 0.999   
+    epsilon: 0.00000001  
   sgd:
-    momentum: 0.9  # Momentum factor for SGD
+    momentum: 0.9

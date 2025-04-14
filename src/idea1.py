@@ -6,22 +6,6 @@ from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    # s = np.array([np.sign(atom.e) for atom in atoms]).T
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    Piv = project_to_simplex(Piv, 1)
-    # Piv = Piv / np.sum(Piv, axis=1)[:, None]
-    c = np.sum(Piv, axis=0)
-    E2 = Piv / (c[None, :] + 1e-10)
-    E = np.sqrt(E2)
-    # E = s * np.sqrt(E2)
-    for atom_idx, atom in enumerate(atoms):
-        atom.e = E[:, atom_idx]
-
-    coefs.update_coefficients(c)
-    return atoms, coefs
-
-
 def CANO(graph, atoms=None, coefs=None, log_results=True):
     n = graph.num_nodes
     num_features = graph.num_features
@@ -41,29 +25,23 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     f_sig = f(sig)
 
     # if log_results:
-    bar = tqdm(total=config.iters, leave=False)
+    bar = tqdm(total=algorithm.iters, leave=False)
     f_values = [f_sig]
     accuracies = []
     epsilsons = []
     components = []
     # coefs.update_coefficients(coefs_opt.get_coefs())
-    for ii in range(config.iters):
+    for ii in range(algorithm.iters):
         idx = np.arange(num_atoms)
         np.random.shuffle(idx)
 
         for ind in idx:
             sig = atoms.calc_sig(coefs)  # Update signal
-            if config.CGD:
-                sig2 = sig - coefs[ind] * atoms[ind].calc_sig_term()
-                grad = f.calc_grad(sig2)
-                atoms[ind].conditional_gradient_update(grad, ii * config.local_iter)
-                # atoms, coefs = map_to_simplex(atoms, coefs)
-            else:
-                grad = f.calc_grad(sig)
-                grad_atom = 2 * coefs[ind] * atoms[ind].calc_grad(grad)
-                atoms[ind].update(grad_atom)  # Update atom
+            grad = f.calc_grad(sig)
+            grad_atom = 2 * coefs[ind] * atoms[ind].calc_grad(grad)
+            atoms[ind].update(grad_atom)  # Update atom
 
-            if ii % config.local_iter == 0:
+            if ii % algorithm.local_iter == 0:
                 # coefs = Enhancemnet_step2(atoms, f, coefs, iters=10, lr=0.0001)
                 atoms, coefs = map_to_simplex(atoms, coefs)
 

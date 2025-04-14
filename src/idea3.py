@@ -5,36 +5,6 @@ from Graph_Atom.graph_func import GraphFunc
 from utils.algorithm_utils import *
 from utils.utils import *
 
-
-def Piv2EC(Piv):
-    c = np.sum(Piv, axis=0)
-    # n = Piv.shape[0]
-    E2 = Piv / (c[None, :] + 1e-10)
-    E = np.sqrt(E2)
-
-    return E, c
-
-
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    Piv = project_to_simplex(Piv, 1)
-    E, c = Piv2EC(Piv)
-    coefs.update_coefficients(c)
-    for idx, atom in enumerate(atoms):
-        atom.e = E[:, idx]
-
-    return atoms, coefs
-
-
-def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
-    coefs = (1 - alpha) * coefs1 + alpha * coefs2
-    alpha_i = alpha * coefs2 / coefs
-    atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
-    # # # atoms, coefs = map_to_simplex(atoms, coefs)
-
-    return atoms, coefs
-
-
 def update(atoms: Atoms, coefs: Coefs, f):
     sig = atoms.calc_sig(coefs)
     grad = f.calc_grad(sig)
@@ -50,7 +20,7 @@ def update(atoms: Atoms, coefs: Coefs, f):
     # Convert argmin to one-hot matrix
     min_indices = np.argmin(grad_Piv, axis=1)
     new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    alpha = config.optimizer.lr
+    alpha = optimizer.lr
     new_E, new_c = Piv2EC(new_Piv)
     new_coefs = Coefs(new_c)
     new_atoms = Atoms()
@@ -68,7 +38,7 @@ def update(atoms: Atoms, coefs: Coefs, f):
     for idx, (atom, coef) in enumerate(zip(atoms, coefs)):
         grad_Ri = atom.calc_grad_Ri(grad.Rv)
         atom.R -= alpha * 2 * coef * grad_Ri
-        atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
+        atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
         grad_bi = atom.calc_grad_bi(grad.pi)
         atom.b -= alpha * 2 * coef * grad_bi
         atom.b = project_to_simplex(atom.b, 1)
@@ -96,14 +66,14 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     f_sig = f(sig)
 
     # if log_results:
-    bar = tqdm(total=config.iters, leave=False)
+    bar = tqdm(total=algorithm.iters, leave=False)
     f_old = 0
     f_values = [f_sig]
     accuracies = []
     epsilsons = []
     components = []
 
-    for ii in range(config.iters):
+    for ii in range(algorithm.iters):
         atoms, coefs = update(atoms, coefs, f)
 
         sig = atoms.calc_sig(coefs)

@@ -27,7 +27,7 @@ class PerfectGraph(Graph):
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)
-            # - config.rho_min * np.eye(self.num_features)[None, :]
+            # - data.rho_min * np.eye(self.num_features)[None, :]
         )
 
     def create_adjacancy__matrix(self):
@@ -75,8 +75,8 @@ class PerfectGraph(Graph):
             [
                 create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
                     self.num_features,
-                    config.sig_rho_min,
-                    config.sig_rho_max,
+                    data.sig_rho_min,
+                    data.sig_rho_max,
                     self.num_signal_features,
                 )
                 for _ in range(self.num_clusters)
@@ -132,8 +132,8 @@ class PerfectGraph(Graph):
         grad_R = np.einsum("ijk,il->ljk", gradient_Rv, self.E**2)
         S, U = np.linalg.eigh(grad_R[2])
         mask1 = S > 0
-        S[mask1] = config.rho_max
-        S[~mask1] = config.rho_min
+        S[mask1] = data.rho_max
+        S[~mask1] = data.rho_min
         R = U @ np.diag(S) @ U.T
 
         return Ri_matrices, Rv_matrices, X

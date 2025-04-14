@@ -7,19 +7,6 @@ from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
-    Piv = project_to_simplex(Piv, 1)
-    c = np.sum(Piv, axis=0)
-    coefs.update_coefficients(c)
-    E2 = Piv / (c[None, :] + 1e-10)
-    E = np.sqrt(E2)
-    for idx, atom in enumerate(atoms):
-        atom.e = E[:, idx]
-
-    return atoms, coefs
-
-
 def update(atoms: Atoms, coefs: Coefs, grad, optimizer):
     Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
     grad_Piv = np.array(
@@ -58,7 +45,7 @@ def update(atoms: Atoms, coefs: Coefs, grad, optimizer):
         atom.R = updated_params[f"R{idx}"]
         atom.b = updated_params[f"b{idx}"]
 
-        atom.R = project_to_psd_cone(atom.R, config.rho_min, config.rho_max)
+        atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
         atom.b = project_to_simplex(atom.b, 1)
 
     return atoms, coefs
@@ -73,7 +60,7 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
         atoms, coefs = create_random_atoms(n, num_features, c, c)
     atoms_opt, coefs_opt = create_optimal_atoms(graph)
     num_atoms = len(atoms)
-    optimizer = get_optimizer(config.optimizer.type)
+    optimizer = get_optimizer(optimizer.type)
     # coefs = coefs_opt
     # atoms = atoms_opt
 
@@ -87,14 +74,14 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
     f_sig = f(sig)
 
     # if log_results:
-    bar = tqdm(total=config.iters, leave=False)
+    bar = tqdm(total=algorithm.iters, leave=False)
     f_values = [f_sig]
     accuracies = []
     epsilsons = []
     components = []
     atom: GraphAtom
     # coefs.update_coefficients(coefs_opt.get_coefs())
-    for ii in range(config.iters):
+    for ii in range(algorithm.iters):
         grad_atoms = []
         sig = atoms.calc_sig(coefs)  # Update signal
         grad = f.calc_grad(sig)
@@ -123,7 +110,6 @@ def CANO(graph, atoms=None, coefs=None, log_results=True):
             f"f": f"{f_sig:,.4f}",
             "acc": acc,
             "f_opt": f"{f_opt:,.4f}",
-            # "beta": config.beta,
         }
 
         # if log_results:

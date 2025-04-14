@@ -2,116 +2,15 @@ import numpy as np
 import scipy as sc
 from Atom.atom import Atom
 from Graph_Atom.graph_sig import GraphSig
-from utils.SBM import SparseAbar
+from utils.outer_product import OuterProduct
 from utils.Optimizer import get_optimizer
 from utils.utils import *
-
-
-# Add a lazy outer product helper for rank-1 matrices
-class OuterProduct:
-    def __init__(self, vector, coef=1):
-        self.vector = vector
-        self.coef = coef
-
-    @property
-    def shape(self):
-        n = self.vector.shape[0]
-        return (n, n)
-
-    def __array__(self, dtype=None):
-        return self.coef * np.outer(self.vector, self.vector)
-
-    # Added: efficient lazy addition functionality
-    def __add__(self, other):
-        if isinstance(other, OuterProduct):
-            return LazyOuterSum([self, other])
-        elif isinstance(other, LazyOuterSum):
-            return LazyOuterSum([self] + other.terms)
-        elif isinstance(other, (int, float)):
-            if other == 0:
-                return self
-            else:
-                return self.__array__() + other
-        else:
-            return self.__array__() + other
-
-    def __sub__(self, other):
-        if isinstance(other, OuterProduct):
-            return LazyOuterSum([self, -1 * other])
-        elif isinstance(other, LazyOuterSum):
-            return LazyOuterSum([self] + (-1 * other).terms)
-        elif isinstance(other, (int, float)):
-            if other == 0:
-                return self
-            else:
-                return self.__array__() + other
-        else:
-            return self.__array__() + other
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __mul__(self, c):
-        if isinstance(c, (int, float)):
-            return OuterProduct(self.vector, self.coef * c)
-        elif isinstance(c, (np.ndarray, SparseAbar)):
-            # Faster implementation using two dot products instead of np.einsum
-            dot_product = c @ self.vector
-            return self.coef * (self.vector @ dot_product)
-
-    def __rmul__(self, c):
-        return self * c
-
-
-# New class to lazily sum multiple OuterProduct objects
-class LazyOuterSum:
-    def __init__(self, terms):
-        self.terms = terms  # list of OuterProduct instances
-
-    @property
-    def shape(self):
-        n = self.terms[0].vector.shape[0]
-        return (n, n)
-
-    def __array__(self, dtype=None):
-        total = 0
-        for term in self.terms:
-            total += np.array(term)
-        return total
-
-    def __add__(self, other):
-        if isinstance(other, OuterProduct):
-            return LazyOuterSum(self.terms + [other])
-        elif isinstance(other, LazyOuterSum):
-            return LazyOuterSum(self.terms + other.terms)
-        else:
-            return np.array(self) + other
-
-    def __sub__(self, other):
-        if isinstance(other, OuterProduct):
-            return LazyOuterSum(self.terms + [-1 * other])
-        elif isinstance(other, LazyOuterSum):
-            return LazyOuterSum(self.terms + [-1 * term for term in other.terms])
-        else:
-            return np.array(self) + other
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __mul__(self, c):
-        if isinstance(c, (int, float)):
-            return LazyOuterSum([term * c for term in self.terms])
-        elif isinstance(c, (np.ndarray, SparseAbar)):
-            return sum([term * c for term in self.terms])
-
-    def __rmul__(self, c):
-        return self * c
 
 
 class GraphAtom(Atom):
     def __init__(self) -> None:
         super().__init__()
-        self.optimizer = get_optimizer(config.optimizer.type)
+        self.optimizer = get_optimizer(optimizer.type)
 
     def set_params(self, e, R, b) -> None:
         self.e = e
@@ -132,8 +31,8 @@ class GraphAtom(Atom):
 
         self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
             self.d,
-            config.rho_min,
-            config.rho_max,
+            data.rho_min,
+            data.rho_max,
             noise_level=0.0,
         )
 
@@ -228,7 +127,7 @@ class GraphAtom(Atom):
 
     def project_to_bound(self):
         self.e = project_to_unit_vector(self.e)
-        self.R = project_to_psd_cone(self.R, config.rho_min, config.rho_max)
+        self.R = project_to_psd_cone(self.R, data.rho_min, data.rho_max)
         self.b = project_to_simplex(self.b, 1)
 
     def reset_optimizer_state(self):
@@ -238,57 +137,9 @@ class GraphAtom(Atom):
     def __str__(self):
         return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
 
-    def conditional_gradient_update(self, grad: GraphSig, itr):
-        """
-        Perform a conditional gradient to update the atom.
-
-        Parameters:
-        - grad: grad of function f
-
-        Returns:
-        - A new atom
-        """
-        max_iter = (
-            config.iter_or_cycles_to_find_next_atom
-            if config.mu1 != 0 or config.mu2 != 0
-            else 1
-        )
-        th_old = np.inf
-        self.initialize(self.n, self.d, self.c)
-
-        for it in range(max_iter):
-            λ = self.CG_update_step(grad, it, itr)
-
-            th = grad.dot(self.calc_sig_term())
-            if abs(th_old - th) < 1e-6:
-                break
-            th_old = th
-
-        return λ
-
-    def CG_update_step(self, grad: GraphSig, it=0, itr=0):
-        """
-        Perform a conditional gradient to update the atom.
-
-        Parameters:
-        - grad: grad of function f
-
-        Returns:
-        - A new atom
-        """
-        λ = self.update_e(grad, it, itr)
-        if config.mu1 != 0:
-            self.update_R(grad, it, itr)
-
-        if config.mu2 != 0:
-            self.update_b(grad)
-
-        return λ
-
     ## Step 1: Fix R and b, update epsilon
-
     def update_e(self, grad: GraphSig, iter=0, itr=0):
-        scale_factor = (config.rho_max / config.rho_min) ** 2
+        scale_factor = (data.rho_max / data.rho_min) ** 2
         if self.R is not None:
             tmp1 = np.einsum("ijk,jk->i", grad.Rv, self.R)
         else:
@@ -325,24 +176,14 @@ class GraphAtom(Atom):
 
         S, U = np.linalg.eigh(grad_R)
 
-        # if plot:
-        #     sub_folder = f"{save_path}{itr}/R/"
-        #     if not os.path.exists(sub_folder):
-        #         os.makedirs(sub_folder)
-
-        #     plt.figure()
-        #     plt.bar(np.arange(S.shape[0]), S)
-        #     plt.savefig(f"{sub_folder}{iter}.png")
-        #     plt.close()
-
         mask1 = S < 0
-        S[mask1] = config.rho_max
-        S[~mask1] = config.rho_min
+        S[mask1] = data.rho_max
+        S[~mask1] = data.rho_min
         self.R = np.einsum("i,ji,ki->jk", S, U, U)
 
-        # S[mask1] = config.rho_max -  config.rho_min
+        # S[mask1] = data.rho_max -  data.rho_min
         # S[~mask1] = 0
-        # self.R = U @ np.diag(S) @ U.T + config.rho_min * np.eye(self.R.shape[0])
+        # self.R = U @ np.diag(S) @ U.T + data.rho_min * np.eye(self.R.shape[0])
 
     ## Step 3: Fix epsilon and R, update b (closed-form solution)
     def update_b(self, grad_pi):
@@ -354,7 +195,7 @@ class GraphAtom(Atom):
         e = np.sqrt(self.e**2 + atom_.e**2)
         R = self.R + atom_.R
         b = self.b + atom_.b
-        # R = project_to_psd_cone(R, config.rho_min, config.rho_max)
+        # R = project_to_psd_cone(R, data.rho_min, data.rho_max)
 
         atom = GraphAtom()
         atom.set_params(e, R, b)

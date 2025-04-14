@@ -129,7 +129,7 @@ class EmptySig(GraphSig):
         self.c = c
 
         self.L = np.zeros((self.n, self.n), dtype=float)
-        self.Rv = np.array([config.rho_min * np.eye(self.d) for _ in range(self.n)])
+        self.Rv = np.array([data.rho_min * np.eye(self.d) for _ in range(self.n)])
         self.pi = np.array([np.zeros(c) for _ in range(self.n)])
         self.Rv_inv = None
         self.Rz = None

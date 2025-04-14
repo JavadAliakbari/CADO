@@ -1,6 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from utils.utils import config  # Import config from utils
+from utils.utils import optimizer  # Import config from utils
 
 
 class Optimizer(ABC):
@@ -29,10 +29,9 @@ class Adam(Optimizer):
             epsilon (float, optional): Small constant to prevent division by zero
         """
         # Use values from config or fallback to defaults
-        optimizer_config = config.optimizer
-        self.beta1 = beta1 if beta1 is not None else optimizer_config.beta1
-        self.beta2 = beta2 if beta2 is not None else optimizer_config.beta2
-        self.epsilon = epsilon if epsilon is not None else optimizer_config.epsilon
+        self.beta1 = beta1 if beta1 is not None else optimizer.beta1
+        self.beta2 = beta2 if beta2 is not None else optimizer.beta2
+        self.epsilon = epsilon if epsilon is not None else optimizer.epsilon
 
         # Optimizer state
         self.m = {}  # First moment estimates
@@ -40,10 +39,10 @@ class Adam(Optimizer):
         self.t = 0  # Time step
 
         # Learning rate scheduling parameters from config
-        self.initial_lr = optimizer_config.lr
-        self.min_lr = optimizer_config.min
-        self.decay_rate = optimizer_config.decay_rate
-        self.decay_steps = optimizer_config.decay_steps
+        self.initial_lr = optimizer.lr
+        self.min_lr = optimizer.min
+        self.decay_rate = optimizer.decay_rate
+        self.decay_steps = optimizer.decay_steps
 
     def step(self, params, gradients):
         """Perform one optimization step
@@ -112,11 +111,10 @@ class Adam(Optimizer):
         """
         if self.initial_lr is None:
             # Use values from config if available, otherwise set defaults
-            optimizer_config = config.optimizer
-            self.initial_lr = optimizer_config.lr
-            self.min_lr = optimizer_config.min
-            self.decay_rate = optimizer_config.decay_rate
-            self.decay_steps = optimizer_config.decay_steps
+            self.initial_lr = optimizer.lr
+            self.min_lr = optimizer.min
+            self.decay_rate = optimizer.decay_rate
+            self.decay_steps = optimizer.decay_steps
 
         # Exponential decay schedule
         scheduled_lr = self.initial_lr * (
@@ -158,17 +156,16 @@ class SGD(Optimizer):
             momentum (float, optional): Momentum factor
         """
         # Use values from config or fallback to defaults
-        optimizer_config = config.optimizer
-        self.momentum = momentum if momentum is not None else optimizer_config.momentum
+        self.momentum = momentum if momentum is not None else optimizer.momentum
 
         self.velocity = {}  # Velocity for momentum
         self.t = 0  # Time step
 
         # Learning rate scheduling parameters from config
-        self.initial_lr = optimizer_config.lr
-        self.min_lr = optimizer_config.min
-        self.decay_rate = optimizer_config.decay_rate
-        self.decay_steps = optimizer_config.decay_steps
+        self.initial_lr = optimizer.lr
+        self.min_lr = optimizer.min
+        self.decay_rate = optimizer.decay_rate
+        self.decay_steps = optimizer.decay_steps
 
     def step(self, params, gradients):
         """Perform one optimization step
@@ -226,11 +223,10 @@ class SGD(Optimizer):
         """
         if self.initial_lr is None:
             # Use values from config if available, otherwise set defaults
-            optimizer_config = config.optimizer
-            self.initial_lr = optimizer_config.lr
-            self.min_lr = optimizer_config.min
-            self.decay_rate = optimizer_config.decay_rate
-            self.decay_steps = optimizer_config.decay_steps
+            self.initial_lr = optimizer.lr
+            self.min_lr = optimizer.min
+            self.decay_rate = optimizer.decay_rate
+            self.decay_steps = optimizer.decay_steps
 
         # Exponential decay schedule
         scheduled_lr = self.initial_lr * (
@@ -253,7 +249,7 @@ def get_optimizer(optimizer_type=None, **kwargs):
     """
     # Use optimizer type from config if not specified
     if optimizer_type is None:
-        optimizer_type = config.optimizer.type
+        optimizer_type = optimizer.type
 
     optimizer_type = optimizer_type.lower()
 

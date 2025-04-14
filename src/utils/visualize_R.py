@@ -2,6 +2,8 @@ import numpy as np
 import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 
+colors = ["red", "blue", "green", "orange", "cyan", "magenta", "yellow", "black"]
+
 
 def visualize_high_dim_data(
     X,
@@ -20,7 +22,6 @@ def visualize_high_dim_data(
 
         X_3d = TSNE(n_components=3).fit_transform(X)
         # TSNE does not support out-of-sample transform; use PCA as fallback for transforming subspace lines
-        from sklearn.decomposition import PCA
 
         transformer_for_lines = PCA(n_components=3).fit(X)
     elif reduction_method.lower() == "umap":
@@ -29,7 +30,6 @@ def visualize_high_dim_data(
         transformer_for_lines = umap.UMAP(n_components=3)
         X_3d = transformer_for_lines.fit_transform(X)
     elif reduction_method.lower() == "pca":
-        from sklearn.decomposition import PCA
 
         transformer_for_lines = PCA(n_components=3)
         X_3d = transformer_for_lines.fit_transform(X)
@@ -44,7 +44,6 @@ def visualize_high_dim_data(
         centers = [np.zeros(X.shape[1]) for _ in range(len(subspaces[0]))]
     k = len(centers)
     t_vals = np.linspace(-3, 3, 1000)
-    colors = ["red", "green", "blue", "cyan", "magenta", "yellow", "black"]
 
     # Build initial traces using the first frame data
     init_clusters = predicted_clusters[0]

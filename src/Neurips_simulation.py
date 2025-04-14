@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.metrics import adjusted_rand_score
 
-from idea5 import CANO
+from idea10 import CANO
 from load_atom import load_atom
 from utils.algorithm_utils import *
 from utils.SBM import SBM
@@ -11,23 +11,22 @@ from utils.utils import *
 np.set_printoptions(threshold=np.inf, suppress=False)
 
 if __name__ == "__main__":
-    samples_per_cluster = [300, 300, 300]  # Number of training samples in each cluster
-    # samples_per_cluster = [600, 400, 200]  # Number of training samples in each cluster
-    num_features = 6  # Dimension of the features at each node
-    num_signal_features = 2  # Number of signal features
+    # Use SBM configuration fields
+    samples_per_cluster = data.samples_per_cluster
+    num_features = data.num_features
+    num_signal_features = data.num_signal_features
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     n_clusters = c
 
-    probs = np.full((c, c), config.q)
-    np.fill_diagonal(probs, config.p)
+    probs = np.full((c, c), data.q)
+    np.fill_diagonal(probs, data.p)
     graph = SBM(
         samples_per_cluster,
         probs,
         num_features,
         num_signal_features,
-        # train_ratio=1,
-        train_ratio=config.train_ratio,
+        train_ratio=data.train_ratio,
     )
     plot_adj(graph.A, name="A")
 
@@ -40,13 +39,15 @@ if __name__ == "__main__":
     plt.title("Cluster labels")
     plt.savefig(f"{save_path}/cluster_labels.png")
 
-    if config.warm_start == "random":
-        atoms, coefs = create_random_atoms(n, num_features, c, c)
-    elif config.warm_start == "optimal":
+    if algorithm.warm_start == "random":
+        atoms, coefs = create_random_atoms(n, num_features, c, c + 1)
+    if algorithm.warm_start == "similar":
+        atoms, coefs = create_similar_atoms(n, num_features, c, c)
+    elif algorithm.warm_start == "optimal":
         atoms, coefs = create_optimal_atoms(graph)
-    elif config.warm_start == "cluster":
+    elif algorithm.warm_start == "cluster":
         atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
-    elif config.warm_start == "load":
+    elif algorithm.warm_start == "load":
         path = "results/20250410_011326/"
         atoms, coefs, graph = load_atom(path)
 

@@ -22,8 +22,8 @@ def create_features(num_nodes, num_features, num_signal_features, num_clusters):
     for i in range(num_clusters):
         Ri = create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
             num_features,
-            config.rho_min,
-            config.rho_max,
+            data.rho_min,
+            data.rho_max,
             num_signal_features,
         )
 
@@ -49,8 +49,8 @@ def create_features(num_nodes, num_features, num_signal_features, num_clusters):
 
 
 def create_features2(num_nodes, num_features, num_signal_features, num_clusters):
-    sigma_signal = np.sqrt(config.sig_rho_max - config.sig_rho_min)
-    sigma_noise = np.sqrt(config.sig_rho_min)
+    sigma_signal = np.sqrt(data.sig_rho_max - data.sig_rho_min)
+    sigma_noise = np.sqrt(data.sig_rho_min)
     node_per_cluster = num_nodes // num_clusters
     Ris = []
     # Rvs = []
@@ -69,7 +69,7 @@ def create_features2(num_nodes, num_features, num_signal_features, num_clusters)
         # Rv = np.einsum(
         #     "i,jk->ijk",
         #     np.ones(node_per_cluster),
-        #     Ri + config.rho_min * np.eye(num_features),
+        #     Ri + data.rho_min * np.eye(num_features),
         # )
 
         Ris.append(Ri)
@@ -97,15 +97,13 @@ class softEM:
         # coefs = np.random.rand(n, self.num_clusters)
         coefs = np.ones((n, self.num_clusters)) / self.num_clusters
 
-        th = (config.rho_max + config.rho_min) / 2
+        th = (data.rho_max + data.rho_min) / 2
         for _ in range(self.num_clusters):
             # Draw a random n_features x d matrix and orthonormalize its columns.
             A = np.random.randn(d, 2)
             # Use QR decomposition to get an orthonormal basis.
             Q, _ = np.linalg.qr(A)
-            R_i = config.rho_min * np.eye(d) + (config.rho_max - config.rho_min) * (
-                Q @ Q.T
-            )
+            R_i = data.rho_min * np.eye(d) + (data.rho_max - data.rho_min) * (Q @ Q.T)
 
             atoms.append(R_i)
 
@@ -149,7 +147,7 @@ class softEM:
 
         for i in range(k):
             R_i = atoms[i]
-            # R_i = atoms[i] + config.rho_min**2 * np.eye(atoms.shape[1])
+            # R_i = atoms[i] + data.rho_min**2 * np.eye(atoms.shape[1])
             # Compute log density for each data point for cluster i.
             for v in range(n_samples):
                 # log(w_i * N(x;0,R_i)) up to constant terms:
@@ -179,7 +177,7 @@ class softEM:
         w_new      : updated cluster priors (array of length k)
         """
         k = coefs.shape[1]
-        th = 10 * config.rho_min
+        th = 10 * data.rho_min
         d = X.shape[1]
 
         for i in range(k):
@@ -194,13 +192,13 @@ class softEM:
             # Take the top d eigenvectors (largest eigenvalues).
             th = eigenvals[-2]
             mask = eigenvals >= th
-            eigenvals[mask] = config.rho_max - config.rho_min
+            eigenvals[mask] = data.rho_max - data.rho_min
             eigenvals[~mask] = 0
             # eigenvals[:-2] = 0
             # eigenvals[-2:] = sigma_signal**2
-            R_i = eigenvecs @ np.diag(
-                eigenvals
-            ) @ eigenvecs.T + config.rho_min * np.eye(d)
+            R_i = eigenvecs @ np.diag(eigenvals) @ eigenvecs.T + data.rho_min * np.eye(
+                d
+            )
             atoms[i] = R_i  # Update the atom
 
         return atoms
@@ -257,8 +255,7 @@ if __name__ == "__main__":
     num_features = 10  # Dimension of the features at each node
     num_signal_features = 2
     n = sum(samples_per_cluster)
-    config.tau = n
-    config.mu0 = 5
+    data.mu0 = 5
     c = len(samples_per_cluster)
 
     # probs = np.eye(c)

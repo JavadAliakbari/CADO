@@ -10,8 +10,6 @@ from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
-import plotly.graph_objects as go
-from sklearn.decomposition import PCA
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
@@ -24,6 +22,9 @@ np.random.seed(seed)
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
 config = Config(config_path)
+data = config.data
+algorithm = config.algorithm
+optimizer = config.optimizer
 
 plot = os.environ.get("PLOT") == "True"
 
@@ -38,13 +39,13 @@ result_path = os.environ.get("RESULTPATH")
 save_path = f"{result_path}/{now}/"
 
 # Define custom colors for 0 and 1 (e.g., 0 -> blue, 1 -> red)
-colors = [
+cmap_colors = [
     (0, "white"),
     (1, "blue"),
 ]  # Replace 'blue' and 'red' with your desired colors
 
 # Create a custom colormap using the colors
-custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", cmap_colors)
 
 
 def matrix_dot_product(A, B):
@@ -473,7 +474,7 @@ def plot_results(
 
     plt.figure()
     for id, atom in enumerate(atoms):
-        plt.plot(atom.e, "*", label=f"atom {id}")
+        plt.plot(atom.e, "*", label=f"atom {id}", color=colors[id])
     plt.legend()
     plt.title("Eigenvectors")
     plt.savefig(f"{save_path}eigenvectors.png")
@@ -488,7 +489,7 @@ def plot_results(
         ax.clear()
         for id, e in enumerate(epsilons[frame]):
             # atom_id = np.argmax(graph.b[id])
-            ax.plot(e, "*", label=f"atom {id}")
+            ax.plot(e, "*", label=f"atom {id}", color=colors[id])
         ax.legend(loc="lower right")
         ax.set_title(f"Eigenvectors_{frame} acc: {accuracies[frame]:.2f}")
         ax.set_ylim(min_e, max_e)
@@ -535,10 +536,3 @@ def save_model_params(atoms, coefs, graph, save_path):
     filename = f"{save_path}graph.pkl"
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)
-
-
-def project_atoms_sig(atoms, coefs, graph):
-    sig = atoms.calc_sig(coefs)
-    pi = project_to_simplex2(sig.pi, 1)
-    L = project_to_bound(sig.L, 0, 1)
-    return sig

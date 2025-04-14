@@ -58,8 +58,8 @@ class SBM(Graph):
         num_features,
         num_signal_features,
         train_ratio=1,
-        rho_min=config.sig_rho_min,
-        rho_max=config.sig_rho_max,
+        rho_min=data.sig_rho_min,
+        rho_max=data.sig_rho_max,
     ) -> None:
         num_nodes = sum(block_sizes)
         super().__init__(num_nodes, train_ratio)
@@ -80,7 +80,7 @@ class SBM(Graph):
 
         self.cov = (
             np.einsum("ij,ik->ijk", self.X, self.X)
-            # - config.rho_min * np.eye(self.num_features)[None, :]
+            # - data.rho_min * np.eye(self.num_features)[None, :]
         )
 
         self.train_labels = self.y[self.train_mask]
@@ -160,7 +160,7 @@ class SBM(Graph):
         ## Calculate Rv based on the provided expression
         Rv_matrices = (
             np.einsum("ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices)
-            # + config.rho_min * np.eye(self.num_features)[None, :]
+            # + data.rho_min * np.eye(self.num_features)[None, :]
         )
 
         # Generate feature vectors X based on the multivariate normal distribution
@@ -196,7 +196,7 @@ class SBM(Graph):
             Rv = np.einsum(
                 "i,jk->ijk",
                 np.ones(node_per_cluster),
-                Ri + config.rho_min * np.eye(self.num_features),
+                Ri + data.rho_min * np.eye(self.num_features),
             )
 
             Ris.append(Ri)

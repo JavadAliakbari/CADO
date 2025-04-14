@@ -16,8 +16,6 @@ def load_atom(path):
     with open(graph_path, "rb") as fid:
         graph = pkl.load(fid)
 
-    config.tau = graph.num_nodes
-
     return atoms, coefs, graph
 
 
