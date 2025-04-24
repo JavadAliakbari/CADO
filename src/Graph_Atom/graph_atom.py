@@ -11,6 +11,7 @@ class GraphAtom(Atom):
     def __init__(self) -> None:
         super().__init__()
         self.optimizer = get_optimizer(optimizer.type)
+        self.r = None
 
     def set_params(self, e, R, b) -> None:
         self.e = e
@@ -29,12 +30,19 @@ class GraphAtom(Atom):
         self.e = np.random.randn(self.n)
         self.e /= np.linalg.norm(self.e)
 
-        self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-            self.d,
-            data.rho_min,
-            data.rho_max,
-            noise_level=0.0,
+        # self.R = (
+        #     create_Ri_symmetric_matrix_with_constrained_trace(self.d)
+        #     + np.eye(d) * data.rho_min
+        # )
+        self.R = create_Ri_symmetric_matrix_with_constrained_trace(
+            self.d, data.rho_min, data.rho_max
         )
+        # self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
+        #     self.d,
+        #     data.rho_min,
+        #     data.rho_max,
+        #     noise_level=0.0,
+        # )
 
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
@@ -86,11 +94,19 @@ class GraphAtom(Atom):
         # grad_ei_2 = np.einsum("ij, j-> i", grad_sig.L, self.e)
         grad_ei = grad_ei_1 + grad_ei_2
 
+        if plot:
+            l = [tmp1, tmp2, self.e, grad_ei_1, grad_ei_2, grad_ei, tmp1 * self.e]
+            for i, ll in enumerate(l):
+                plt.figure()
+                plt.plot(ll)
+                plt.savefig(f"{save_path}x{i}.png")
         return grad_ei
 
     def calc_grad_Ri(self, grad_Rv):
         if grad_Rv is not None:
-            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2)
+            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2) + 0.0 * np.eye(
+                self.R.shape[0]
+            )
 
             return grad_Ri
         else:
@@ -176,10 +192,16 @@ class GraphAtom(Atom):
 
         S, U = np.linalg.eigh(grad_R)
 
-        mask1 = S < 0
-        S[mask1] = data.rho_max
-        S[~mask1] = data.rho_min
-        self.R = np.einsum("i,ji,ki->jk", S, U, U)
+        if self.r is None:
+            self.r = water_filling(data.rho_min, data.rho_max, len(S))
+
+        # mask1 = S < 0
+        # # mask1 = S < S[2]
+        # S[mask1] = data.rho_max
+        # S[~mask1] = data.rho_min
+        # S /= np.sum(S)
+        self.R = np.einsum("i,ji,ki->jk", self.r, U, U)
+        # self.R = np.outer(U[:, 0], U[:, 0]) + np.eye(self.R.shape[0]) * data.rho_min
 
         # S[mask1] = data.rho_max -  data.rho_min
         # S[~mask1] = 0

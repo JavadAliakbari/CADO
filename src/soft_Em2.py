@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 from subspace_clustring import (
     generate_cluster_data,
-    visualize_high_dim_data2,
+    # visualize_high_dim_data2,
 )
 from utils.algorithm_utils import *
 from utils.utils import *
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     Ri_matrices, X, Q, clusters = create_features(
         n, num_features, num_signal_features, c
     )
-    visualize_high_dim_data2(X, clusters, Q)
+    visualize_high_dim_data(X, clusters, Q)
     os.makedirs(save_path, exist_ok=True)
     plt.savefig(f"{save_path}true_clusters.png")
     # plt.show()
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     print("Adjusted Rand Index (ARI):", ari)
 
     Q_pred = np.array([np.linalg.eigh(R)[1] for R in atoms])
-    visualize_high_dim_data2(X, y_pred, Q_pred)
+    visualize_high_dim_data(X, y_pred, Q_pred)
     os.makedirs(save_path, exist_ok=True)
     plt.savefig(f"{save_path}pred_clusters.png")
     plt.show()

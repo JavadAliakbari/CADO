@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
+from scipy.linalg import logm, expm
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
@@ -75,6 +76,29 @@ def calc_accuracy(pred_y, y):
     return sum(pred_y == y) / len(y)
 
 
+def water_filling(a, b, d):
+    # --- water‑filling on the capped simplex ----------------------------
+    r = np.full(d, a)  # give each slot the minimum mass a
+    t = 1.0 - d * a  # mass still to distribute
+
+    if t < -1e-12:
+        raise ValueError("a too large: no feasible R with trace 1")
+
+    for i in range(d):  # fill cheapest directions first
+        if t <= 0:
+            break
+        add = min(b - a, t)
+        r[i] += add
+        t -= add
+
+    if t > 1e-12:
+        raise ValueError("b too small: cannot reach trace 1")
+
+    return r
+
+    # --------------------------------------------------------------------
+
+
 def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     dimension, rho_minus, rho_plus, noise_level=0.0
 ):
@@ -103,6 +127,38 @@ def create_Ri_symmetric_matrix_with_constrained_eigenvalues(
     # Construct the symmetric matrix using A = Q * Lambda * Q.T
     Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
     symmetric_matrix = Q @ Lambda @ Q.T + symmetric_noise
+
+    return symmetric_matrix
+
+
+def create_Ri_symmetric_matrix_with_constrained_trace(
+    dimension, rho_minus=None, rho_plus=None
+):
+    """
+    Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
+
+    Parameters:
+    dimension (int): Size of the matrix (n x n).
+    rho_minus (float): Lower bound of the eigenvalues.
+    rho_plus  (float): Upper bound of the eigenvalues.
+    noise_level (float): The scale of the noise to be added (small value to slightly perturb).
+
+    Returns:
+    np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
+    """
+    # Generate dimension eigenvalues uniformly distributed between rho_minus and rho_plus
+    all_eigenvalues = np.random.rand(dimension)
+    if rho_minus is not None:
+        all_eigenvalues = project_capped_simplex(all_eigenvalues, rho_minus, rho_plus)
+    else:
+        all_eigenvalues = project_to_simplex(all_eigenvalues)
+
+    # Create rho_minus random orthogonal matrix Q using QR decomposition
+    Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
+
+    # Construct the symmetric matrix using A = Q * Lambda * Q.T
+    Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
+    symmetric_matrix = Q @ Lambda @ Q.T
 
     return symmetric_matrix
 
@@ -202,6 +258,53 @@ def create_multiple_noisy_probability_vectors(
     return np.array(probability_vectors)
 
 
+def project_capped_simplex(r, a, b, tol=1e-12, max_iter=1000):
+    """
+    Project a vector r onto the set
+        { x : sum(x) = 1,  a ≤ x_i ≤ b }   (capped simplex)
+
+    Parameters
+    ----------
+    r : (d,) array_like
+        Input vector (any real values).
+    a, b : floats
+        Lower and upper bounds with 0 < a < b < 1.
+        Feasibility requires  d*a ≤ 1 ≤ d*b .
+    tol : float, optional
+        Bisection tolerance on the dual variable.
+    max_iter : int, optional
+        Maximum number of bisection steps.
+
+    Returns
+    -------
+    x : (d,) ndarray
+        The projected vector.
+    """
+    r = np.asarray(r, dtype=float)
+    d = r.size
+
+    # quick feasibility check
+    if d * a - 1 > tol or d * b - 1 < -tol:
+        raise ValueError("No feasible point: make sure d*a ≤ 1 ≤ d*b.")
+
+    # f(tau) = sum_i clip(r_i - tau, a, b) - 1     (monotone ↓ in tau)
+    lo = r.min() - b  # f(lo) = d*b - 1  ≥ 0
+    hi = r.max() - a  # f(hi) = d*a - 1  ≤ 0
+
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2.0
+        s = np.clip(r - mid, a, b).sum()
+        if s > 1:  # we need a larger tau
+            lo = mid
+        else:  # we need a smaller tau
+            hi = mid
+        if hi - lo < tol:
+            break
+
+    tau = hi  # root of f(tau) ≈ 0
+    return np.clip(r - tau, a, b)
+
+
 def project_to_unit_vector(vector):
     """
     Project a vector onto the unit vector.
@@ -230,6 +333,28 @@ def project_to_psd_cone(matrix, rho_minus, rho_plus):
 
     # Clip the eigenvalues to ensure they are non-negative
     clipped_eigenvalues = np.clip(eigenvalues, rho_minus, rho_plus)
+
+    # Reconstruct the matrix using the clipped eigenvalues
+    projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T
+
+    return projected_matrix
+
+
+def project_to_unit_trace(matrix, rho_min, rho_max):
+    """
+    Project a matrix onto the positive semidefinite cone.
+
+    Parameters:
+    matrix (np.ndarray): The input matrix to be projected.
+
+    Returns:
+    np.ndarray: The projected positive semidefinite matrix.
+    """
+    # Perform eigenvalue decomposition
+    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+
+    # Clip the eigenvalues to ensure they are non-negative
+    clipped_eigenvalues = project_capped_simplex(eigenvalues, rho_min, rho_max)
 
     # Reconstruct the matrix using the clipped eigenvalues
     projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T
@@ -347,6 +472,61 @@ def one_hot_max(vector):
     return one_hot_vector
 
 
+def matrix_sqrt(A):
+    """
+    Returns A^(1/2) and A^(-1/2) for a symmetric PSD matrix A.
+    We compute the eigen-decomposition A = Q * diag(eigvals) * Q^T,
+    then take the square root of the eigenvalues.
+    """
+    # Eigen-decomposition
+    w, V = np.linalg.eigh(A)
+
+    # Square roots of eigenvalues (assuming all w >= 0)
+    w_sqrt = np.sqrt(w)
+    w_invsqrt = 1.0 / (w_sqrt + 1e-15)  # add epsilon to avoid division by zero
+
+    # Reconstruct A^(1/2) and A^(-1/2)
+    A_sqrt = (V * w_sqrt) @ V.T
+    A_invsqrt = (V * w_invsqrt) @ V.T
+
+    return A_sqrt, A_invsqrt
+
+
+def log_euclidean_interp(R1, R2, alpha):
+    return expm((1 - alpha) * logm(R1) + alpha * logm(R2))
+
+
+def harmonic_interp(R1, R2, alpha):
+    Rinv = (1 - alpha) * np.linalg.inv(R1) + alpha * np.linalg.inv(R2)
+    return np.linalg.inv(Rinv)
+
+
+def geodesic_interpolation(R1, R2, alpha):
+    """
+    Computes R(alpha) = R1^(1/2) * (R1^(-1/2) * R2 * R1^(-1/2))^alpha * R1^(1/2).
+    The result is a PSD matrix that 'geodesically' interpolates between R1 and R2.
+    """
+    # Compute R1^(1/2) and R1^(-1/2)
+    R1_sqrt, R1_invsqrt = matrix_sqrt(R1)
+
+    # Compute M = R1^(-1/2) * R2 * R1^(-1/2)
+    M = R1_invsqrt @ R2 @ R1_invsqrt
+
+    # Diagonalize M
+    w, V = np.linalg.eigh(M)
+
+    # Raise eigenvalues to the alpha power
+    w_alpha = w**alpha
+
+    # Reconstruct M^alpha
+    M_alpha = (V * w_alpha) @ V.T
+
+    # Finally, compute the geodesic interpolation
+    R_alpha = R1_sqrt @ M_alpha @ R1_sqrt
+
+    return R_alpha
+
+
 def plot_adj(A, name="L"):
     os.makedirs(save_path, exist_ok=True)
     # Display the array as an image
@@ -455,10 +635,10 @@ def plot_results(
     pi = np.array(pi) - min_pi
     min_f = np.min(f_values)
     f = np.array(f_values) - min_f
-    plt.plot(L, label="L")
-    plt.plot(R, label="R")
-    plt.plot(pi, label="pi")
-    plt.plot(f, label="f")
+    plt.plot(L, label="L", color="b")
+    plt.plot(R, label="R", color="r")
+    plt.plot(pi, label="pi", color="orange")
+    plt.plot(f, label="f", color="black")
     plt.title("Loss")
     plt.yscale("log")
     plt.legend()
@@ -480,8 +660,9 @@ def plot_results(
     plt.savefig(f"{save_path}eigenvectors.png")
 
     fig, ax = plt.subplots()
-    max_e = np.max(epsilons)
-    min_e = np.min(epsilons)
+    num_frames = len(epsilons)
+    max_e = np.max(epsilons[num_frames // 2 :])
+    min_e = np.min(epsilons[num_frames // 2 :])
     ax.set_ylim(min_e, max_e)
     ax.set_title("Eigenvectors")
 

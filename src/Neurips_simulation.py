@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.metrics import adjusted_rand_score
 
-from idea10 import CANO
+from idea5 import CANO
 from load_atom import load_atom
 from utils.algorithm_utils import *
 from utils.SBM import SBM
@@ -40,9 +40,9 @@ if __name__ == "__main__":
     plt.savefig(f"{save_path}/cluster_labels.png")
 
     if algorithm.warm_start == "random":
-        atoms, coefs = create_random_atoms(n, num_features, c, c + 1)
+        atoms, coefs = create_random_atoms(n, num_features, c, c)
     if algorithm.warm_start == "similar":
-        atoms, coefs = create_similar_atoms(n, num_features, c, c)
+        atoms, coefs = create_similar_atoms(graph, c)
     elif algorithm.warm_start == "optimal":
         atoms, coefs = create_optimal_atoms(graph)
     elif algorithm.warm_start == "cluster":
@@ -62,7 +62,13 @@ if __name__ == "__main__":
         components,
         opt_params,
         R_params,
-    ) = CANO(graph, atoms, coefs, log_results=False)
+    ) = CANO(
+        graph,
+        atoms,
+        coefs,
+        lr_search=False,
+        log_results=False,
+    )
 
     LOGGER = log_results(atoms, coefs, graph, results, save_path)
     LOGGER.info(f"ARI: {ari:.4f}")

@@ -97,6 +97,9 @@ class GraphSig(Sig):
         else:
             raise ValueError("Right division is only supported for scalars")
 
+    def __matmul__(self, sig):
+        return self.dot(sig)
+
     def get_params(self):
         return self.n, self.d, self.c
 

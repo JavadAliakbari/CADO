@@ -114,6 +114,7 @@ class GraphFunc(f):
                 cov_batch = self.graph.cov[start:end]
                 Y = np.matmul(cov_batch, X)
                 X2 = np.linalg.solve(batch_Rv, Y)
+                # gradient_Rv[start:end] = I_batch - X2
                 gradient_Rv[start:end] = X - X2
             return self.mu1 * gradient_Rv / normalizer
         else:

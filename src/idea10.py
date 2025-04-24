@@ -130,9 +130,14 @@ def update(
     if prev_loss is not None and curr_loss is not None:
         rel_loss_change = (curr_loss - prev_loss) / (abs(prev_loss) + 1e-10)
 
+    grad_coefs = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms]).T
+
     # Continue with normal atom and coef updates
     grad_Piv = np.array(
-        [coef * atom.calc_grad_ei(grad) for coef, atom in zip(coefs, atoms)]
+        [
+            grad_coef * atom.calc_grad_ei(grad)
+            for grad_coef, atom in zip(grad_coefs, atoms)
+        ]
     ).T
 
     # Apply Nesterov-like momentum to gradient if we have previous gradient
