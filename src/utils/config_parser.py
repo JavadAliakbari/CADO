@@ -61,3 +61,5 @@ class AlgorithmConfig:
         self.Abar = config["Abar"]
         self.warm_start = config["warm_start"]
         self.normalize = config["normalize"]
+        self.unit_trace = config["unit_trace"]
+        self.independent_rho = config["independent_rho"]

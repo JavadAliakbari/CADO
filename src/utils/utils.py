@@ -340,7 +340,7 @@ def project_to_psd_cone(matrix, rho_minus, rho_plus):
     return projected_matrix
 
 
-def project_to_unit_trace(matrix, rho_min, rho_max):
+def project_to_unit_trace(matrix, rho_min=None, rho_max=None):
     """
     Project a matrix onto the positive semidefinite cone.
 
@@ -353,8 +353,12 @@ def project_to_unit_trace(matrix, rho_min, rho_max):
     # Perform eigenvalue decomposition
     eigenvalues, eigenvectors = np.linalg.eigh(matrix)
 
+    if rho_min is not None:
+        clipped_eigenvalues = project_capped_simplex(eigenvalues, rho_min, rho_max)
+    else:
+        clipped_eigenvalues = project_to_simplex(eigenvalues)
+
     # Clip the eigenvalues to ensure they are non-negative
-    clipped_eigenvalues = project_capped_simplex(eigenvalues, rho_min, rho_max)
 
     # Reconstruct the matrix using the clipped eigenvalues
     projected_matrix = eigenvectors @ np.diag(clipped_eigenvalues) @ eigenvectors.T

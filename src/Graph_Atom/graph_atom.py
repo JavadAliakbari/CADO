@@ -30,19 +30,23 @@ class GraphAtom(Atom):
         self.e = np.random.randn(self.n)
         self.e /= np.linalg.norm(self.e)
 
-        # self.R = (
-        #     create_Ri_symmetric_matrix_with_constrained_trace(self.d)
-        #     + np.eye(d) * data.rho_min
-        # )
-        self.R = create_Ri_symmetric_matrix_with_constrained_trace(
-            self.d, data.rho_min, data.rho_max
-        )
-        # self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-        #     self.d,
-        #     data.rho_min,
-        #     data.rho_max,
-        #     noise_level=0.0,
-        # )
+        if algorithm.unit_trace:
+            if algorithm.independent_rho:
+                self.R = (
+                    create_Ri_symmetric_matrix_with_constrained_trace(self.d)
+                    + np.eye(d) * data.rho_min
+                )
+            else:
+                self.R = create_Ri_symmetric_matrix_with_constrained_trace(
+                    self.d, data.rho_min, data.rho_max
+                )
+        else:
+            self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
+                self.d,
+                data.rho_min,
+                data.rho_max,
+                noise_level=0.0,
+            )
 
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
@@ -104,9 +108,7 @@ class GraphAtom(Atom):
 
     def calc_grad_Ri(self, grad_Rv):
         if grad_Rv is not None:
-            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2) + 0.0 * np.eye(
-                self.R.shape[0]
-            )
+            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2)
 
             return grad_Ri
         else:
@@ -185,27 +187,33 @@ class GraphAtom(Atom):
         return λ
 
     ## Step 2: Fix epsilon and b, update R
-    def update_R(self, grad_Rv, iter=0, itr=0):
+    def update_R(self, grad_Rv):
         if grad_Rv is None:
             return
         grad_R = self.calc_grad_Ri(grad_Rv)
 
         S, U = np.linalg.eigh(grad_R)
 
-        if self.r is None:
-            self.r = water_filling(data.rho_min, data.rho_max, len(S))
+        if algorithm.unit_trace:
+            if algorithm.independent_rho:
+                self.R = (
+                    np.outer(U[:, 0], U[:, 0]) + np.eye(self.R.shape[0]) * data.rho_min
+                )
+            else:
+                if self.r is None:
+                    self.r = water_filling(data.rho_min, data.rho_max, len(S))
+                self.R = np.einsum("i,ji,ki->jk", self.r, U, U)
+        else:
+            mask1 = S < 0
+            # mask1 = S < S[2]
+            S[mask1] = data.rho_max
+            S[~mask1] = data.rho_min
+            # S /= np.sum(S)
+            self.R = np.einsum("i,ji,ki->jk", S, U, U)
 
-        # mask1 = S < 0
-        # # mask1 = S < S[2]
-        # S[mask1] = data.rho_max
-        # S[~mask1] = data.rho_min
-        # S /= np.sum(S)
-        self.R = np.einsum("i,ji,ki->jk", self.r, U, U)
-        # self.R = np.outer(U[:, 0], U[:, 0]) + np.eye(self.R.shape[0]) * data.rho_min
-
-        # S[mask1] = data.rho_max -  data.rho_min
-        # S[~mask1] = 0
-        # self.R = U @ np.diag(S) @ U.T + data.rho_min * np.eye(self.R.shape[0])
+            # S[mask1] = data.rho_max -  data.rho_min
+            # S[~mask1] = 0
+            # self.R = U @ np.diag(S) @ U.T + data.rho_min * np.eye(self.R.shape[0])
 
     ## Step 3: Fix epsilon and R, update b (closed-form solution)
     def update_b(self, grad_pi):

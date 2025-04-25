@@ -9,41 +9,6 @@ from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def schedule_lr(
-    ii,
-    max_iter=algorithm.iters,
-    min_lr=optimizer.min,
-    max_lr=optimizer.lr,
-    warmup_steps=algorithm.warmup_steps,
-    decay_steps=optimizer.decay_steps,
-    decay_rate=optimizer.decay_rate,
-    method=optimizer.method,
-    # method="exponential",
-    # method="cosine",
-):
-    if method == "cosine":
-        lr = min_lr + 0.5 * (max_lr - min_lr) * (
-            1 + np.cos(np.pi * (ii - warmup_steps) / (max_iter - warmup_steps))
-        )
-        if ii < warmup_steps:
-            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
-    elif method == "linear":
-        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
-        if ii < warmup_steps:
-            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
-    elif method == "exponential":
-        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
-        if ii < warmup_steps:
-            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
-        elif ii < max_iter - decay_steps:
-            lr = max_lr
-        else:
-            lr = max_lr + (min_lr - max_lr) * np.exp(
-                -decay_rate * (ii - max_iter + decay_steps)
-            )
-    return lr
-
-
 def update(
     atoms: Atoms,
     coefs: Coefs,
@@ -106,7 +71,8 @@ def update(
         new_atoms[idx].update_b(grad.pi)
 
     if lr_search:
-        atoms, coefs = line_search(atoms, coefs, new_atoms, new_coefs, f)
+        alpha = schedule_lr(ii)
+        atoms, coefs = line_search(atoms, coefs, new_atoms, new_coefs, f, alpha)
     else:
         alpha = schedule_lr(ii)
         atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)

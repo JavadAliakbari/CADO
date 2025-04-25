@@ -47,10 +47,11 @@ def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
         #     (1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2)
         # )
         atom.R = (1 - alpha2) * atom1.R + alpha2 * atom2.R
+        if not algorithm.unit_trace:
+            atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
         # atom.R = geodesic_interpolation(atom1.R, atom2.R, alpha2)
         # atom.R = harmonic_interp(atom1.R, atom2.R, alpha2)
         # atom.R = log_euclidean_interp(atom1.R, atom2.R, alpha2)
-        # atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
         # atom.R = project_to_unit_trace(atom.R, data.rho_min, data.rho_max)
         atom.b = (1 - alpha2) * atom1.b + alpha2 * atom2.b
 
@@ -116,13 +117,20 @@ def create_optimal_atoms(graph: Graph):
     c = graph.num_classes
     Rv = graph.cov
     n = graph.num_nodes
+    d = graph.num_features
 
     for i in range(c):
         atom0 = GraphAtom()
-        # RR = project_to_psd_cone(R[i], data.rho_min, data.rho_max)
         e = E[:, i]
         RR = np.einsum("ijk,i->jk", Rv, e**2)
-        RR = project_to_unit_trace(RR, data.rho_min, data.rho_max)
+        if algorithm.unit_trace:
+            if algorithm.independent_rho:
+                RR = project_to_unit_trace(RR) + np.eye(d) + data.rho_min
+
+            else:
+                RR = project_to_unit_trace(RR, data.rho_min, data.rho_max)
+        else:
+            RR = project_to_psd_cone(RR, data.rho_min, data.rho_max)
 
         b = np.zeros((n, graph.num_clusters))
         node_ids = np.arange(n)
@@ -183,7 +191,9 @@ def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
     return atoms, coefs
 
 
-def line_search(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
+def line_search(
+    atoms1, coefs1, atoms2, coefs2, f, alpha_high_limit=1, max_steps=10, tol=1e-5
+):
     """
     Perform line search to find the optimal step size alpha that minimizes f.
 
@@ -203,7 +213,7 @@ def line_search(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
     """
 
     alpha_low = 0
-    alpha_high = 0.05
+    alpha_high = alpha_high_limit
 
     atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
     sig_low = atoms_low.calc_sig(coefs_low)
@@ -243,125 +253,6 @@ def line_search(atoms1, coefs1, atoms2, coefs2, f, max_steps=10, tol=1e-5):
     # Update atoms and coefficients using the optimal alpha
     atoms, coefs = interpolate(atoms1, coefs1, atoms2, coefs2, alpha)
 
-    return atoms, coefs
-
-
-def line_search2(
-    atoms1, coefs1, atoms2, coefs2, f, max_steps=20, tol=1e-5, num_restarts=3
-):
-    """
-    Perform enhanced line search to find the optimal step size alpha that minimizes f.
-    Uses multiple techniques to avoid getting stuck in local minima:
-    - Wider initial search range
-    - Adaptive range expansion
-    - Multiple random restarts
-    - Golden section search
-
-    Args:
-        atoms1: Current atoms.
-        coefs1: Current coefficients.
-        atoms2: New atoms (direction).
-        coefs2: New coefficients (direction).
-        f: Objective function to minimize.
-        max_steps: Maximum number of steps for each search.
-        tol: Tolerance for convergence.
-        num_restarts: Number of random restarts to try.
-
-    Returns:
-        atoms: Updated atoms after applying the optimal step size.
-        coefs: Updated coefficients after applying the optimal step size.
-    """
-    best_alpha = 0
-    best_value = float("inf")
-
-    # Try multiple random initializations to avoid local minima
-    for _ in range(num_restarts):
-        # Start with a wider search range
-        alpha_low = 0
-        alpha_high = 0.5  # Much wider than the original 0.1
-
-        # Add some randomization to the high value to increase exploration
-        alpha_high = min(1.0, alpha_high * (0.5 + np.random.rand()))
-
-        atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
-        sig_low = atoms_low.calc_sig(coefs_low)
-        f_low = f(sig_low)
-
-        atoms_high, coefs_high = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_high)
-        sig_high = atoms_high.calc_sig(coefs_high)
-        f_high = f(sig_high)
-
-        # Golden section search (more efficient than bisection)
-        golden_ratio = (np.sqrt(5) - 1) / 2  # ≈ 0.618
-
-        # Initialize intermediate points
-        alpha_mid1 = alpha_low + (1 - golden_ratio) * (alpha_high - alpha_low)
-        alpha_mid2 = alpha_low + golden_ratio * (alpha_high - alpha_low)
-
-        atoms_mid1, coefs_mid1 = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_mid1)
-        sig_mid1 = atoms_mid1.calc_sig(coefs_mid1)
-        f_mid1 = f(sig_mid1)
-
-        atoms_mid2, coefs_mid2 = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_mid2)
-        sig_mid2 = atoms_mid2.calc_sig(coefs_mid2)
-        f_mid2 = f(sig_mid2)
-
-        # Keep track of all evaluated points in case we need to check boundaries
-        evaluated_points = [
-            (alpha_low, f_low),
-            (alpha_high, f_high),
-            (alpha_mid1, f_mid1),
-            (alpha_mid2, f_mid2),
-        ]
-
-        # Perform search
-        for _ in range(max_steps):
-            if abs(alpha_high - alpha_low) < tol:
-                break
-
-            if f_mid1 > f_mid2:
-                # Move the left part of the interval
-                alpha_low = alpha_mid1
-                f_low = f_mid1
-                alpha_mid1 = alpha_mid2
-                f_mid1 = f_mid2
-
-                # Calculate new right mid point
-                alpha_mid2 = alpha_low + golden_ratio * (alpha_high - alpha_low)
-                atoms_mid2, coefs_mid2 = interpolate(
-                    atoms1, coefs1, atoms2, coefs2, alpha_mid2
-                )
-                sig_mid2 = atoms_mid2.calc_sig(coefs_mid2)
-                f_mid2 = f(sig_mid2)
-                evaluated_points.append((alpha_mid2, f_mid2))
-            else:
-                # Move the right part of the interval
-                alpha_high = alpha_mid2
-                f_high = f_mid2
-                alpha_mid2 = alpha_mid1
-                f_mid2 = f_mid1
-
-                # Calculate new left mid point
-                alpha_mid1 = alpha_low + (1 - golden_ratio) * (alpha_high - alpha_low)
-                atoms_mid1, coefs_mid1 = interpolate(
-                    atoms1, coefs1, atoms2, coefs2, alpha_mid1
-                )
-                sig_mid1 = atoms_mid1.calc_sig(coefs_mid1)
-                f_mid1 = f(sig_mid1)
-                evaluated_points.append((alpha_mid1, f_mid1))
-
-        # Check if we need to explore beyond our initial range
-        # If the best point is at the boundary, expand in that direction
-        evaluated_points.sort(key=lambda x: x[1])  # Sort by function value
-        best_alpha_local, best_value_local = evaluated_points[0]
-
-        # If this is better than our previous best, update
-        if best_value_local < best_value:
-            best_value = best_value_local
-            best_alpha = best_alpha_local
-
-    # Final interpolation with the best alpha found
-    atoms, coefs = interpolate(atoms1, coefs1, atoms2, coefs2, best_alpha)
     return atoms, coefs
 
 
@@ -519,3 +410,39 @@ def find_eps(E, c_new):
     tilde_eps, tilde_c = Piv2EC(Piv)
 
     return tilde_eps, tilde_c
+
+
+def schedule_lr(
+    ii,
+    max_iter=algorithm.iters,
+    min_lr=optimizer.min,
+    max_lr=optimizer.lr,
+    warmup_steps=algorithm.warmup_steps,
+    decay_steps=optimizer.decay_steps,
+    decay_rate=optimizer.decay_rate,
+    method=optimizer.method,
+    # method="exponential",
+    # method="cosine",
+):
+    if method == "cosine":
+        lr = min_lr + 0.5 * (max_lr - min_lr) * (
+            1 + np.cos(np.pi * (ii - warmup_steps) / (max_iter - warmup_steps))
+        )
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+    elif method == "linear":
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+        else:
+            lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+    elif method == "exponential":
+        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+        elif ii < max_iter - decay_steps:
+            lr = max_lr
+        else:
+            lr = max_lr + (min_lr - max_lr) * np.exp(
+                -decay_rate * (ii - max_iter + decay_steps)
+            )
+    return lr
