@@ -17,6 +17,7 @@ from sklearn.metrics import adjusted_rand_score
 
 # helper function to run a single run of the experiment
 def run_single(run, p):
+    # print(f"Running p={p:.3f} run={run}")
     # build SBM
     c = len(data.samples_per_cluster)
     probs = np.full((c, c), data.q)
@@ -58,18 +59,19 @@ def run_single(run, p):
     )
     loss_final1 = f_vals2[-1]
     acc_final1 = accs2[-1]
-    # _, _, _, _, f_vals3, accs3, *_ = CANO(
-    #     graph,
-    #     atoms,
-    #     coefs,
-    #     mu1=1,
-    #     mu2=0,
-    #     lr_search=False,
-    #     log_results=False,
-    #     leave=False,
-    # )
-    # loss_final2 = f_vals3[-1]
-    # acc_final2 = accs3[-1]
+
+    _, _, _, _, f_vals2, accs2, *_ = CANO(
+        graph,
+        atoms,
+        coefs,
+        mu1=1,
+        mu2=0,
+        lr_search=False,
+        log_results=False,
+        leave=False,
+    )
+    loss_final2 = f_vals2[-1]
+    acc_final2 = accs2[-1]
 
     # Compute ARI for spectral clustering
     # Perform spectral clustering using the graph's adjacency matrix (assumed to be graph.A)
@@ -83,6 +85,8 @@ def run_single(run, p):
         "acc0": np.round(acc_final0, 4),
         "loss1": np.round(loss_final1, 4),
         "acc1": np.round(acc_final1, 4),
+        "loss2": np.round(loss_final2, 4),
+        "acc2": np.round(acc_final2, 4),
         "sc_acc": np.round(sc_acc, 4),
     }
 
@@ -113,8 +117,9 @@ def process_p(p, out_dir="./"):
     df.to_csv(p_csv, index=False)
     mean_acc0 = df["acc0"].mean()
     mean_acc1 = df["acc1"].mean()
+    mean_acc2 = df["acc2"].mean()
     mean_ari = df["sc_acc"].mean()
-    return mean_acc0, mean_acc1, mean_ari
+    return mean_acc0, mean_acc1, mean_acc2, mean_ari
 
 
 def main():
@@ -127,9 +132,9 @@ def main():
 
     bar = tqdm(p_values, unit="p", leave=False)
     for p in p_values:
-        mean_acc0, mean_acc1, mean_ari = process_p(p, out_dir=out_dir)
+        mean_acc0, mean_acc1, mean_acc2, mean_ari = process_p(p, out_dir=out_dir)
         bar.set_postfix(
-            {"p": p, "acc0": mean_acc0, "acc": mean_acc1, "sc_acc": mean_ari}
+            {"p": p, "acc0": mean_acc0, "acc1": mean_acc1, "acc2": mean_acc2, "sc_acc": mean_ari}
         )
         bar.update()
         # print(f"Processed p={p:.3f}, saved to {p_csv}")
