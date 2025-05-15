@@ -1,21 +1,21 @@
 data:
-  # samples_per_cluster: [300, 300, 300]  # Number of samples per cluster
-  samples_per_cluster: [600, 400, 200]
+  samples_per_cluster: [300, 300, 300]  # Number of samples per cluster
+  # samples_per_cluster: [600, 400, 200]
   num_features: 6
   num_signal_features: 2
   train_ratio: 0.2
   p: 0.1
   q: 0.05
-  mu0: 0.1
+  mu0: 0.4
   mu1: 1.0
   mu2: 5.5
   rho_min: 0.04                    
-  rho_max: 1
+  rho_max: 1.0
   sig_rho_min: 0.04                    
-  sig_rho_max: 100   
+  sig_rho_max: 10  
 algorithm:
   iters: 500               
-  warmup_steps: 1500
+  warmup_steps: 500
   momentum_beta: 0.9
   mu_lr_max: 1e-6
   mu_lr_min: 1e-12
@@ -24,12 +24,12 @@ algorithm:
   warm_start: "random"                  # "optimal" or "random" or "cluster"
   Abar: True
   normalize: True
-  unit_trace: True
+  unit_trace: False
   independent_rho: False
 optimizer:
   type: "sgd"  # Options: "adam", "sgd"
   learning_rate:
-    initial: 0.05 # Initial learning rate
+    initial: 0.075 # Initial learning rate
     min: 0.000000001    # Minimum learning rate
     decay_rate: 0.999  # Decay rate for learning rate scheduling
     decay_steps: 10   # Number of steps between learning rate updates

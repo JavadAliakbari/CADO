@@ -4,7 +4,11 @@ import scipy.sparse as sp
 
 from utils.graph import Graph
 from subspace_clustring import generate_cluster_data
-from utils.utils import *
+from utils.utils import (
+    create_Ri_symmetric_matrix_with_constrained_eigenvalues2,
+    create_multiple_noisy_probability_vectors,
+    data,
+)
 
 
 # Add scalar multiplication support for SparseAbar objects.
@@ -196,7 +200,7 @@ class SBM(Graph):
             Rv = np.einsum(
                 "i,jk->ijk",
                 np.ones(node_per_cluster),
-                Ri + data.rho_min * np.eye(self.num_features),
+                Ri + self.rho_min * np.eye(self.num_features),
             )
 
             Ris.append(Ri)

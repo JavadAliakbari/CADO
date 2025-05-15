@@ -1,5 +1,4 @@
 import numpy as np
-from sklearn.metrics import adjusted_rand_score
 
 from idea5 import CANO
 from load_atom import load_atom
@@ -33,7 +32,7 @@ if __name__ == "__main__":
     # Run spectral clustering
     n_clusters = c  # Number of clusters
     cluster_labels = run_spectral_clustering(graph, n_clusters)
-    ari = adjusted_rand_score(graph.y, cluster_labels)
+    ari = clustring_accuracy(graph.y, cluster_labels)
     plt.figure()
     plt.plot(cluster_labels)
     plt.title("Cluster labels")
@@ -67,7 +66,7 @@ if __name__ == "__main__":
         atoms,
         coefs,
         lr_search=False,
-        log_results=False,
+        log_results=True,
     )
 
     LOGGER = log_results(atoms, coefs, graph, results, save_path)

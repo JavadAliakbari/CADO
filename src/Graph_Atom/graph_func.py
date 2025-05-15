@@ -1,15 +1,20 @@
+import numpy as np
+
 from Graph_Atom.graph_sig import GraphSig
 from Atom.function import f
 from utils.graph import Graph
-from utils.utils import *
+from utils.utils import data, algorithm, matrix_dot_product
 
 
 class GraphFunc(f):
-    def __init__(self, graph: Graph, mu0=data.mu0, mu1=data.mu1, mu2=data.mu2) -> None:
+    def __init__(self, graph: Graph, **kwargs) -> None:
         self.graph: Graph = graph
-        self.mu0 = mu0
-        self.mu1 = mu1
-        self.mu2 = mu2
+        self.mu0 = kwargs.get("mu0", data.mu0)
+        self.mu1 = kwargs.get("mu1", data.mu1)
+        self.mu2 = kwargs.get("mu2", data.mu2)
+        self.p = kwargs.get("p", data.p)
+        self.q = kwargs.get("q", data.q)
+        self.train_ratio = kwargs.get("train_ratio", data.train_ratio)
 
         self.grad_pi = self.calc_grad_pi()
 
@@ -90,7 +95,7 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        normalizer = signal.n * (data.p) * (1 - data.q) if algorithm.normalize else 1
+        normalizer = signal.n * (self.p) * (1 - self.q) if algorithm.normalize else 1
 
         if algorithm.Abar:
             return self.mu0 * (-self.graph.Abar) / normalizer
@@ -122,7 +127,7 @@ class GraphFunc(f):
 
     def calc_grad_pi(self):
         normalizer = (
-            self.graph.num_classes * data.train_ratio if algorithm.normalize else 1
+            self.graph.num_classes * self.train_ratio if algorithm.normalize else 1
         )
         gradient_pi = np.zeros(
             (self.graph.num_nodes, self.graph.num_classes), dtype=float

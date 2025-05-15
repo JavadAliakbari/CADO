@@ -19,7 +19,7 @@ def update(
     soft_assignment=True,
     lr_search=True,
 ):
-    ss = np.array([np.sign(atom.e) for atom in atoms]).T
+    # ss = np.array([np.sign(atom.e) for atom in atoms]).T
     sig = atoms.calc_sig(coefs)
     grad = f.calc_grad(sig)
 
@@ -59,7 +59,7 @@ def update(
         # Convert argmin to one-hot matrix
         min_indices = np.argmin(grad_Piv, axis=1)
         new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    new_E, new_c = Piv2EC(new_Piv, ss)
+    new_E, new_c = Piv2EC(new_Piv)
 
     new_coefs = Coefs(new_c)
     new_atoms = deepcopy(atoms)
@@ -92,10 +92,13 @@ def CANO(
     lr_search=True,
     log_results=True,
     leave=True,
+    **kwargs,
 ):
     n = graph.num_nodes
     num_features = graph.num_features
     c = graph.num_clusters
+
+    mu2 = kwargs.get("mu2", data.mu2)
     ## Initialization
     if atoms is None:
         atoms, coefs = create_random_atoms(n, num_features, c, c)
@@ -103,8 +106,9 @@ def CANO(
 
     atoms, coefs = map_to_simplex(atoms, coefs)
     sig = atoms.calc_sig(coefs)
+
     # Initialize GraphFunc with the current mu0 value
-    f = GraphFunc(graph=graph)
+    f = GraphFunc(graph=graph, **kwargs)
 
     opt_sig = atoms_opt.calc_sig(coefs_opt)
     f_opt, L_opt, R_opt, pi_opt = f(opt_sig, components=True)
@@ -112,8 +116,8 @@ def CANO(
     f_sig = f(sig)
     prev_grad = None
 
-    # if log_results:
-    bar = tqdm(total=algorithm.iters, leave=leave)
+    if log_results:
+        bar = tqdm(total=algorithm.iters, leave=leave)
     f_values = [f_sig]
     accuracies = []
     epsilsons = []
@@ -142,23 +146,24 @@ def CANO(
         y_pred = np.argmax(sig.pi, axis=1)
         y_pred_test = y_pred[graph.test_mask]
         if y_pred_test.shape[0] > 0:
-            acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+            if mu2 is None or mu2 == 0:
+                acc = clustring_accuracy(y_pred_test, graph.y[graph.test_mask])
+            else:
+                acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
         else:
             acc = 1
 
         results = {
             f"f": f"{f_sig:,.4f}",
-            "acc": acc,
+            "acc": f"{acc:,.4f}",
             "f_opt": f"{f_opt:,.4f}",
-            # "mu0": f"{mu0:,.4f}",  # Add mu0 to results
-            # "mu1": f"{mu1:,.4f}",  # Add mu1 to results
         }
         y_pred = np.argmax(sig.pi, axis=1)
         Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
 
-        # if log_results:
-        bar.set_postfix(results)
-        bar.update()
+        if log_results:
+            bar.set_postfix(results)
+            bar.update()
         f_values.append(f_sig)
         accuracies.append(acc)
         epsilsons.append([atoms.e.copy() for atoms in atoms])

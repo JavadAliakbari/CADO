@@ -123,16 +123,3 @@ class GraphSig(Sig):
         # if self.Rv is not None:
         #     self.Rv = project(self.Rv)
         # self.pi = project(self.pi)
-
-
-class EmptySig(GraphSig):
-    def __init__(self, n, d, c) -> None:
-        self.n = n
-        self.d = d
-        self.c = c
-
-        self.L = np.zeros((self.n, self.n), dtype=float)
-        self.Rv = np.array([data.rho_min * np.eye(self.d) for _ in range(self.n)])
-        self.pi = np.array([np.zeros(c) for _ in range(self.n)])
-        self.Rv_inv = None
-        self.Rz = None

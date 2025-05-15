@@ -11,6 +11,9 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 from scipy.linalg import logm, expm
+from scipy.optimize import linear_sum_assignment as linear_assignment
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
 
 from utils.config_parser import Config
 from utils.logger import getLOGGER
@@ -71,9 +74,20 @@ def invert_matrix(matrix):
         return np.eye(matrix.shape[0])
 
 
-def calc_accuracy(pred_y, y):
+def calc_accuracy(y_pred, y_true):
     """Calculate accuracy."""
-    return sum(pred_y == y) / len(y)
+    return sum(y_pred == y_true) / len(y_true)
+
+
+def clustring_accuracy(y_pred, y_true):
+    # --- map cluster IDs to class IDs with Hungarian matching ---
+    cm = confusion_matrix(y_true, y_pred)
+    row_ind, col_ind = linear_assignment(cm.max() - cm)  # maximize matches
+    mapping = {col: row for row, col in zip(row_ind, col_ind)}
+    y_aligned = np.vectorize(mapping.get)(y_pred)
+
+    acc = accuracy_score(y_true, y_aligned)
+    return acc
 
 
 def water_filling(a, b, d):
