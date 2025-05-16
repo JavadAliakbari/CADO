@@ -3,6 +3,7 @@ import json
 import os
 import pickle as pkl
 import random
+import shutil
 
 import cvxpy as cp
 from dotenv import load_dotenv
@@ -19,9 +20,9 @@ from utils.config_parser import Config
 from utils.logger import getLOGGER
 from utils.visualize_R import *
 
-seed = 4
-random.seed(seed)
-np.random.seed(seed)
+# seed = 10
+# random.seed(seed)
+# np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -50,6 +51,16 @@ cmap_colors = [
 
 # Create a custom colormap using the colors
 custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", cmap_colors)
+
+
+def save_config(output_path, config_name="config.yaml"):
+    """Save the current config to the output directory"""
+
+    # Create destination filename with timestamp
+    dest_file = os.path.join(output_path, config_name)
+
+    # Copy the file
+    shutil.copy2(config_path, dest_file)
 
 
 def matrix_dot_product(A, B):
@@ -590,12 +601,6 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
     # Reattach terminal handlers
     LOGGER.addHandler(h)
 
-    y_pred_test = y_pred[graph.test_mask]
-    if y_pred_test.shape[0] > 0:
-        acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
-    else:
-        acc = 0
-    LOGGER.info(acc)
     return LOGGER
 
 

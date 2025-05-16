@@ -35,16 +35,16 @@ def update(
 
     # grad_Piv = np.array(grad_Piv).T
 
-    # grad_Piv = np.array(
-    #     [coef * (atom.calc_grad_ei(grad) ** 1) for coef, atom in zip(coefs, atoms)]
-    # ).T
-    grad_coefs = np.abs([grad @ atom.calc_sig_term() for atom in atoms]).T
     grad_Piv = np.array(
-        [
-            grad_coef * (atom.calc_grad_ei(grad) ** 1)
-            for grad_coef, atom in zip(grad_coefs, atoms)
-        ]
+        [coef * (atom.calc_grad_ei(grad) ** 1) for coef, atom in zip(coefs, atoms)]
     ).T
+    # grad_coefs = np.abs([grad @ atom.calc_sig_term() for atom in atoms]).T
+    # grad_Piv = np.array(
+    #     [
+    #         grad_coef * (atom.calc_grad_ei(grad) ** 1)
+    #         for grad_coef, atom in zip(grad_coefs, atoms)
+    #     ]
+    # ).T
     # Apply momentum to gradient if we have previous gradient
     if prev_grad is not None:
         grad_Piv = momentum_beta * prev_grad + (1 - momentum_beta) * grad_Piv
@@ -143,22 +143,24 @@ def CANO(
         sig = atoms.calc_sig(coefs)
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
 
-        y_pred = np.argmax(sig.pi, axis=1)
-        y_pred_test = y_pred[graph.test_mask]
-        if y_pred_test.shape[0] > 0:
-            if mu2 is None or mu2 == 0:
-                acc = clustring_accuracy(y_pred_test, graph.y[graph.test_mask])
-            else:
-                acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+        if mu2 is None or mu2 == 0:
+            E = np.array([atom.e for atom in atoms])
+            y_pred = np.argmax(E, axis=0)
+            acc = clustring_accuracy(y_pred, graph.y)
         else:
-            acc = 1
+            y_pred = np.argmax(sig.pi, axis=1)
+            y_pred_test = y_pred[graph.test_mask]
+            if y_pred_test.shape[0] > 0:
+                acc = calc_accuracy(y_pred_test, graph.y[graph.test_mask])
+            else:
+                acc = 1
 
         results = {
             f"f": f"{f_sig:,.4f}",
             "acc": f"{acc:,.4f}",
             "f_opt": f"{f_opt:,.4f}",
         }
-        y_pred = np.argmax(sig.pi, axis=1)
+        # y_pred = np.argmax(sig.pi, axis=1)
         Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
 
         if log_results:

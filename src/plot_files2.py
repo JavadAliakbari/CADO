@@ -22,11 +22,13 @@ def plot(out_dir):
 
     # compute per-p averages
     summary = df.groupby("p").mean().reset_index()
+    summary.to_csv(os.path.join(out_dir, "sweep_results_avg.csv"), index=False)
 
     # plot accuracy vs p
     plt.figure()
     plt.plot(summary["p"], summary["acc1"], marker="o", label="with R", color="b")
     plt.plot(summary["p"], summary["acc0"], marker="o", label="without R", color="r")
+    plt.plot(summary["p"], summary["acc2"], marker="o", label="without b", color="y")
     plt.plot(
         summary["p"],
         summary["sc_acc"],
@@ -58,5 +60,5 @@ def plot(out_dir):
 
 
 if __name__ == "__main__":
-    out_dir = "results/20250427_105847/sweep p/"
+    out_dir = "results/20250516_022828/sweep p/"
     plot(out_dir)
