@@ -22,13 +22,14 @@ def plot(out_dir):
 
     # compute per-p averages
     summary = df.groupby("rho_min").mean().reset_index()
+    summary.to_csv(os.path.join(out_dir, "sweep_results_avg.csv"), index=False)
 
     # plot accuracy vs p
     plt.figure()
-    plt.plot(summary["rho_min"], summary["acc1"], marker="o", label="with L", color="b")
-    plt.plot(
-        summary["rho_min"], summary["acc0"], marker="o", label="without L", color="r"
-    )
+    plt.plot(summary["rho_min"], summary["acc0"], marker="o", label="f+g+l", color="b")
+    plt.plot(summary["rho_min"], summary["acc1"], marker="o", label="f+l", color="r")
+    plt.plot(summary["rho_min"], summary["acc2"], marker="o", label="f+g", color="g")
+    plt.plot(summary["rho_min"], summary["acc3"], marker="o", label="f", color="y")
     # plt.gca().invert_xaxis()  # optional: show largest p at left
     plt.xlabel("$\\rho_{min}$")
     plt.ylabel("Accuracy")
@@ -57,5 +58,5 @@ def plot(out_dir):
 
 
 if __name__ == "__main__":
-    out_dir = "results/20250428_121519/sweep rho_min/"
+    out_dir = "main results/20250516_044012/sweep rho_min/"
     plot(out_dir)

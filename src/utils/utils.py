@@ -20,9 +20,9 @@ from utils.config_parser import Config
 from utils.logger import getLOGGER
 from utils.visualize_R import *
 
-# seed = 10
-# random.seed(seed)
-# np.random.seed(seed)
+seed = 10
+random.seed(seed)
+np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")

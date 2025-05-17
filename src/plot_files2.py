@@ -26,9 +26,9 @@ def plot(out_dir):
 
     # plot accuracy vs p
     plt.figure()
-    plt.plot(summary["p"], summary["acc1"], marker="o", label="with R", color="b")
-    plt.plot(summary["p"], summary["acc0"], marker="o", label="without R", color="r")
-    plt.plot(summary["p"], summary["acc2"], marker="o", label="without b", color="y")
+    plt.plot(summary["p"], summary["acc1"], marker="o", label="f+g+l", color="b")
+    plt.plot(summary["p"], summary["acc0"], marker="o", label="g+l", color="r")
+    plt.plot(summary["p"], summary["acc2"], marker="o", label="g+f", color="y")
     plt.plot(
         summary["p"],
         summary["sc_acc"],
@@ -60,5 +60,5 @@ def plot(out_dir):
 
 
 if __name__ == "__main__":
-    out_dir = "results/20250516_022828/sweep p/"
+    out_dir = "results/20250516_102453/sweep p/"
     plot(out_dir)

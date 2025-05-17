@@ -128,7 +128,7 @@ def process_p(p, out_dir="./", debug_mode=False):
         with concurrent.futures.ProcessPoolExecutor(
             # max_workers=10
         ) as executor:  # modified to limit to 5 tasks
-            total_runs = 200 if p <= 0.1 else 50
+            total_runs = 200 if p <= 0.1 else 200
             futures = [executor.submit(run_single, run, p) for run in range(total_runs)]
             results = []
             # Using tqdm to track completion of run_single calls
@@ -159,7 +159,7 @@ def process_p(p, out_dir="./", debug_mode=False):
 
 
 def main():
-    p_values = np.arange(0.10, 0.0, -0.01)
+    p_values = np.arange(0.14, 0.15, 0.01)
 
     # dispatch all p in parallel
     path = "sweep p/"
@@ -171,7 +171,9 @@ def main():
     bar = tqdm(p_values, unit="p", leave=False)
     for p in p_values:
         try:
-            mean_acc0, mean_acc1, mean_acc2, mean_acc3, mean_ari = process_p(p, out_dir=out_dir)
+            mean_acc0, mean_acc1, mean_acc2, mean_acc3, mean_ari = process_p(
+                p, out_dir=out_dir
+            )
             bar.set_postfix(
                 {
                     "p": p,

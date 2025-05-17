@@ -70,6 +70,7 @@ if __name__ == "__main__":
     )
 
     LOGGER = log_results(atoms, coefs, graph, results, save_path)
+    LOGGER.info(f"acc: {accuracies[-1]:.4f}")
     LOGGER.info(f"ARI: {ari:.4f}")
     LOGGER.info(f"loss: {f_values[-1]:.4f}")
     plot_results(
