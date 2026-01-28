@@ -1,528 +1,448 @@
-from copy import deepcopy
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy as sc
-
+from sklearn.cluster import SpectralClustering
+from scipy.optimize import root
 
 from Atom.coefs import Coefs
 from Atom.atoms import Atoms
 from Graph_Atom.graph_atom import GraphAtom
-from Graph_Atom.graph_sig import GraphSig
-from Graph_Atom.graph_func import GraphFunc
+from utils.graph import Graph
 from utils.utils import *
 
 
-def find_next_atom(grad: GraphSig, constraints, itr) -> GraphAtom:
-    """
-    Alternating minimization to find the next atom.
-
-    Parameters:
-    - grad: grad of function f
-
-    Returns:
-    - A new atom
-    """
-    n, d, c = grad.get_params()
-
-    atom = GraphAtom()
-    atom.initialize(n, d, c)
-    # atom.R = None
-
-    max_iter = (
-        config.iter_or_cycles_to_find_next_atom
-        if config.mu1 != 0 or config.mu2 != 0
-        else 1
-    )
-    th_old = np.inf
-
-    for it in range(max_iter):
-        epsilon, λ = update_e(grad, atom, constraints, it, itr)
-        atom.update_e(epsilon)
-
-        if config.mu1 != 0:
-            R = update_R(grad, atom, it, itr)
-            atom.update_R(R)
-
-        if config.mu2 != 0:
-            b = update_b(grad, atom)
-            atom.update_b(b)
-
-        th = grad.dot(atom.calc_sig_term())
-        if abs(th_old - th) < 1e-6:
-            break
-        th_old = th
-
-    return atom, λ
-
-
-def find_next_atom2(grad: GraphSig, R, itr) -> GraphAtom:
-    """
-    Alternating minimization to find the next atom.
-
-    Parameters:
-    - grad: grad of function f
-
-    Returns:
-    - A new atom
-    """
-    n, d, c = grad.get_params()
-
-    atom = GraphAtom()
-    atom.initialize(n, d, c)
-    atom.R = R
-
-    # Alternating minimization
-    max_iter = config.iter_or_cycles_to_find_next_atom
-    if config.mu1 == 0 and config.mu2 == 0:
-        max_iter = 1
-
-    th_old = np.inf
-    plt.figure()
-    th_list = []
-    for it in range(max_iter):
-        epsilon = update_e(grad, atom, it, itr)
-        atom.update_e(epsilon)
-        # th = grad.dot(atom.calc_sig_term())
-        # diff = th_old - th
-        # th_old = th
-
-        # if config.mu1 != 0:
-        #     R = update_R(grad, atom, it, itr)
-        #     atom.update_R(R)
-        # th = grad.dot(atom.calc_sig_term())
-        # diff = th_old - th
-        # th_old = th
-
-        if config.mu2 != 0:
-            b = update_b(grad, atom)
-            atom.update_b(b)
-            # th = grad.dot(atom.calc_sig_term())
-            # diff = th_old - th
-            # th_old = th
-
-        th = grad.dot(atom.calc_sig_term())
-        th_list.append(th)
-        diff = th_old - th
-        if abs(diff) < 1e-6:
-            break
-        else:
-            th_old = th
-
-    # Return the next atom in the form [epsilon @ epsilon^T, R, b]
-    if plot:
-        sub_folder = f"{save_path}{itr}/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-        plt.figure()
-        plt.plot(th_list[1:])
-        plt.savefig(f"{sub_folder}th_list.jpg", format="jpg")
-    return atom
-
-
-def find_eps_lambda(A, constraints):
-    n = A.shape[0]
-    λ, evecs_large = sc.linalg.eigh(A, subset_by_index=(n - 1, n - 1))
-    x = evecs_large[:, 0]
-
-    epsilon_pri = 1e-10
-    max_iterations = 1000
-
-    for _ in range(max_iterations):
-        h = λ * (x**2)
-        # Update y
-        y = np.clip(h, 0, constraints)
-
-        e = np.sign(x) * np.sqrt(y / (λ + 1e-10))
-        e /= np.linalg.norm(e) + 1e-10
-        λ = np.einsum("i,ij,j->", e, A, e)
-
-        r = y - h
-
-        # Check convergence
-        if np.linalg.norm(r) <= epsilon_pri:
-            break
-
-    return e, λ
-
-
-def find_eps_lambda2(A, constraints):
-    # Initialize variables
-    # x = initial_x  # Ensure x^T x = 1
-    n = A.shape[0]
-    nu = np.zeros(n)
-    rho = 5  # Penalty parameter
-
-    epsilon_pri = 1e-6
-    max_iterations = 1000
-
-    for k in range(max_iterations):
-        # Update x
-        M = A + np.diag(nu)
-        λ, evecs_large = sc.linalg.eigh(M, subset_by_index=(n - 1, n - 1))
-        x = evecs_large[:, 0]
-        # eigenvalues, eigenvectors = np.linalg.eigh(M)
-        # λ = np.argmax(eigenvalues)
-        # x = eigenvectors[:, λ]
-
-        h = λ * (x**2)
-        # Update y
-        y = np.clip(h - nu / rho, 0, constraints)
-
-        # Update dual variables
-        r = y - h
-        nu += rho * r
-
-        # Check convergence
-        if np.linalg.norm(r) <= epsilon_pri:
-            break
-
-    # e = np.sign(x) * np.sqrt(y / λ)
-    # e =
-    # λ2 = np.einsum("i,ij,j->", e, A, e)
-    return x, λ
-
-
-## Step 1: Fix R and b, update epsilon
-def update_e(grad: GraphSig, atom: GraphAtom, constraints, iter=0, itr=0):
-    scale_factor = (config.rho_max / config.rho_min) ** 2
-    if atom.R is not None:
-        tmp1 = np.einsum("ijk,jk->i", grad.Rv, atom.R)
-    else:
-        tmp1 = 0
-
-    tmp1 /= scale_factor
-    tmp2 = np.einsum("ij,j->i", grad.pi, atom.b)
-    tmp3 = grad.L + np.diag(tmp1 + tmp2)
-    # S, eigvecs = np.linalg.eigh(-tmp3)
-    N = tmp3.shape[0]
-
-    epsilon, λ = find_eps_lambda(-tmp3, constraints)
-
-    # A = -tmp3
-    # λ, evecs_large = sc.linalg.eigh(A, subset_by_index=(N - 1, N - 1))
-    # epsilon = evecs_large[:, 0]
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/e/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-        plt.figure()
-        plt.plot(epsilon, "-*")
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    return epsilon, λ
-
-
-## Step 2: Fix epsilon and b, update R
-def update_R(grad: GraphSig, atom: GraphAtom, iter, itr=0):
-    grad_R = np.einsum("ijk,i->jk", grad.Rv, atom.e**2)
-
-    S, U = np.linalg.eigh(grad_R)
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/R/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-
-        plt.figure()
-        plt.bar(np.arange(S.shape[0]), S)
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    mask1 = S < 0
-    S[mask1] = config.rho_max - config.rho_min
-    S[~mask1] = 0
-    R = U @ np.diag(S) @ U.T
-
-    return R
-
-
-## Step 2: Fix epsilon and b, update R
-def update_R2(grad: GraphSig, atom: GraphAtom, iter, itr=0):
-    grad_R = np.einsum("ijk,i->jk", grad, atom.e**2)
-
-    S, U = np.linalg.eigh(grad_R)
-
-    if plot:
-        sub_folder = f"{save_path}{itr}/R/"
-        if not os.path.exists(sub_folder):
-            os.makedirs(sub_folder)
-
-        plt.figure()
-        plt.bar(np.arange(S.shape[0]), S)
-        plt.savefig(f"{sub_folder}{iter}.png")
-        plt.close()
-
-    mask1 = S > config.rho_max
-    S[mask1] = config.rho_max
-    mask2 = S < config.rho_min
-    S[mask2] = config.rho_min
-    R = U @ np.diag(S) @ U.T
-
-    return R
-
-
-## Step 3: Fix epsilon and R, update b (closed-form solution)
-def update_b(grad: GraphSig, atom: GraphAtom):
-    a = np.einsum("i, ij-> j", atom.e**2, grad.pi)
-    b = np.zeros(grad.pi.shape[-1], dtype=float)
-    b[np.argmin(a)] = 1
-
-    return b
-
-
-def Gamma_line_search(atoms: Atoms, f: GraphFunc, coefs: Coefs):
-    """
-    Perform a line search to find the optimal gamma value that minimizes the function f.
-
-    This function uses a binary search approach to find the gamma value in the range [0, 1]
-    that minimizes the function f when applied to the signal calculated from the scaled coefficients.
-
-    Parameters:
-    atoms (Atoms): An object that contains the method `calc_sig` to calculate the signal from coefficients.
-    f (GraphFunc): A function that takes a signal and returns a scalar value to be minimized.
-    coefs (Coefs): An object that contains the method `scale_coefs` to scale the coefficients by a given gamma value.
-
-    Returns:
-    float: The gamma value in the range [0, 1] that minimizes the function f.
-    """
-    gamma_min, gamma_max = 0, 1
-
-    for _ in range(10):
-        gamma_mean = (gamma_max + gamma_min) / 2
-        coefs_gamma_mean = Coefs.scale_coefs(coefs, gamma_mean)
-        sig_gamma_mean = atoms.calc_sig(coefs_gamma_mean)
-        f_gamma_mean = f(sig_gamma_mean)
-
-        if f_gamma_mean < f(atoms.calc_sig(Coefs.scale_coefs(coefs, gamma_min))):
-            gamma_max = gamma_mean
-        else:
-            gamma_min = gamma_mean
-
-    return gamma_min
-
-
-def remove_atom(atoms: Atoms, f: GraphFunc, coefs: Coefs) -> int:
-    """
-    Identifies the index of the atom whose removal minimizes the value of the given function `f`
-    when applied to the residual signature.
-
-    Parameters:
-    atoms (Atoms): The collection of atoms.
-    f (GraphFunc): A function that evaluates the residual signature.
-    coefs (Coefs): The coefficients associated with the atoms.
-
-    Returns:
-    int: The index of the atom whose removal minimizes the value of `f`. Returns 0 if there is only one coefficient.
-    """
-    if len(coefs) == 1:
-        return 0, np.inf
-    sig = atoms.calc_sig(coefs)
-
-    min_val = np.inf
-    arg_min_idx = -1
-    for idx in range(len(coefs)):
-        # new_coefs = deepcopy(coefs)
-        # new_atoms = deepcopy(atoms)
-        # new_coefs.remove_coef(idx)
-        # # new_atoms.remove_atom(atoms[idx])
-        # new_atoms.remove_idx(idx)
-        # c_new = project_to_simplex(new_coefs, config.tau)
-        # new_coefs = Coefs(c_new)
-        # if config.enhance:
-        #     new_coefs = Enhancemnet_step(new_atoms, f, new_coefs)
-        # residual_sig = new_atoms.calc_sig(new_coefs)
-        single_sig = atoms[idx].calc_sig_term()
-        if coefs[idx] == 0:
-            residual_sig = sig
-        else:
-            single_sig = coefs[idx] * single_sig
-            residual_sig = sig - single_sig
-        val = f(residual_sig)
-
-        if val < min_val:
-            min_val = val
-            arg_min_idx = idx
-
-    return arg_min_idx, min_val
-
-
-def Forward_step(atoms: Atoms, f: GraphFunc, coefs: Coefs, sig, itr):
-    """
-    Perform a forward step in the CoGEnT algorithm.
-
-    Parameters:
-    atoms (Atoms): The current set of atoms.
-    f (GraphFunc): The graph function used to calculate the gradient.
-    coefs (Coefs): The coefficients associated with the atoms.
-    sig: The signal or data used for gradient calculation.
-    itr (int): The current iteration number.
-
-    Returns:
-    Coefs: The updated coefficients after the forward step.
-    """
-    constraints = 1 - sum(
-        [c * (atom.e**2) for c, atom in zip(coefs.get_coefs(), atoms)],
-        np.zeros(300),
-    )
-    constraints[constraints < 0] = 0
-
-    grad = f.calc_grad(sig)
-
-    new_atom, λ = find_next_atom(grad, constraints, itr)
-    coefs.add_coef(λ)
-    atoms.add_atom(new_atom)
-
-    return atoms, coefs
-
-
-def Enhancemnet_step(atoms: Atoms, f: GraphFunc, coefs: Coefs):
-    """
-    Perform the enhancement step for the given coefficients.
-
-    Parameters:
-    atoms (Atoms): The atoms object containing the necessary methods for calculations.
-    f (GraphFunc): The graph function object used to calculate gradients and function values.
-    coefs (Coefs): The coefficients object to be updated.
-
-    Returns:
-    Coefs: The updated coefficients object.
-
-    Description:
-    This function performs an enhancement step to update the coefficients using gradient projection.
-    It iteratively adjusts the coefficients to minimize the function value while ensuring they lie
-    within a simplex defined by a given tau value. The function uses a gradient projection method
-    with backtracking line search to find the optimal step size. The process stops when the
-    convergence tolerance is met or the step size becomes too small.
-    """
-    # if len(coefs) <= 1:
-    #     coefs.update_coefficients([config.tau])
-    #     return coefs
-
-    alpha_min, alpha_red, c1 = 1e-6, 0.5, 1e-3
-    E = [atom.e for atom in atoms]
-    E2 = np.array(E).T ** 2
-    c_new = project_inside_simplex2(coefs.get_coefs(), E2, 1)
-    coefs = Coefs(c_new)
-
-    sig = atoms.calc_sig(coefs)
-    grad = f.calc_grad(sig)
-
-    for _ in range(config.GP_iters):
-        grad_λ = np.array([grad.dot(atom.calc_sig_term()) for atom in atoms])
-        alpha, stop_flag = 1, False
-
-        while alpha > alpha_min and not stop_flag:
-            new_λ = coefs.get_coefs() - alpha * grad_λ
-            c_new = project_inside_simplex2(new_λ, E2, 1)
-            new_coefs = Coefs(c_new)
-            tol_check = np.linalg.norm(coefs.get_coefs() - c_new)
-
-            if alpha == 1 and tol_check <= config.GP_tol:
-                stop_flag = True
-
-            if f(atoms.calc_sig(new_coefs)) <= f(sig) + c1 * (
-                (c_new - coefs.get_coefs()).T @ grad_λ
-            ):
-                break
-
-            alpha *= alpha_red
-
-        if stop_flag or alpha < alpha_min:
-            return coefs
-
-        coefs = deepcopy(new_coefs)
-        sig = atoms.calc_sig(coefs)
-        grad = f.calc_grad(sig)
-
-    return coefs
-
-
-def Enhancemnet_step2(atoms: Atoms, f: GraphFunc, coefs: Coefs):
-    alpha = 0.01
-    stop_flag = False
-    iter = 0
-    while not stop_flag and iter < config.GP_iters:
-        sig = atoms.calc_sig(coefs)
-        grad = f.calc_grad(sig)
-        g = np.array(
-            [grad.dot(atom.calc_sig_term()) for atom in atoms]
-        )  # Gradient of the function
-
-        # Projection onto the simplex
-        c = coefs.get_coefs()
-        c_new = project_to_simplex(c - alpha * g, config.tau)
-        # c_new = c - alpha * g
-        coefs.update_coefficients(c_new)
-
-        # Check convergence tolerance
-        tol_check = np.linalg.norm(c - c_new)
-        if tol_check <= config.GP_tol:
-            stop_flag = True
-
-        iter += 1
-
-    # atoms.update_coefficients(coefs=c)
-    return coefs
-
-
-def Truncate(atoms: Atoms, f: GraphFunc, coefs: Coefs, F_th):
-    """
-    Truncates the given set of atoms and coefficients based on a threshold function value.
-
-    Parameters:
-    atoms (Atoms): The set of atoms to be truncated.
-    f (GraphFunc): A function that evaluates the significance of the atoms.
-    coefs (Coefs): The coefficients associated with the atoms.
-    F_th (float): The threshold value for the function evaluation.
-
-    Returns:
-    tuple: A tuple containing the truncated set of atoms and the updated coefficients.
-    """
-    terminate = False
-    while not terminate:
-        remove_idx, f_val = remove_atom(atoms, f, coefs)
-        if f_val <= F_th:
-            atoms.remove_atom(atoms[remove_idx])
-            coefs.remove_coef(remove_idx)
-        else:
-            terminate = True
-
-    return atoms, coefs
-
-
-def Enhance_step(atoms, coefs):
-    E = [atom.e for atom in atoms]
-    E = np.array(E).T
-    n, c = E.shape
-
-    # l = n * np.random.rand(c)
-    # l = n * np.ones(c) / c
-    l = coefs.get_coefs()
-    l = project_to_simplex2(l, n)
-
-    total = 1000
-    # bar = tqdm(total=total)
-    for _ in range(total):
-        H = E**2 @ np.diag(l)
-        A = project_to_simplex2(H, 1)
-        new_l = np.sum(A, axis=0)
-
-        # f1 = sum(sum(np.abs(H - A)))
-        f2 = sum(np.abs(new_l - l))
-        l = new_l
-
-        if f2 < 1e-6:
-            break
-
-        # bar.set_postfix(f1=f1, f2=f2)
-        # bar.update()
-
-    new_E = A @ np.diag(1 / l)
+def Piv2EC(Piv, s=None):
+    c = np.sum(Piv, axis=0)
+    E2 = Piv / (c[None, :] + 1e-10)
+    E = np.sqrt(E2)
+    # if s is not None:
+    #     E *= s
+
+    return E, c
+
+
+def map_to_simplex(atoms: Atoms, coefs: Coefs):
+    s = np.array([np.sign(atom.e) for atom in atoms]).T
+    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
+    Piv = project_to_simplex(Piv, 1)
+    E, c = Piv2EC(Piv, s)
+    coefs.update_coefficients(c)
     for idx, atom in enumerate(atoms):
-        atom.e = np.sqrt(new_E[:, idx])
-
-    coefs.update_coefficients(l)
+        atom.e = E[:, idx]
 
     return atoms, coefs
+
+
+def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
+    alpha = float(alpha)
+    # alpha_c = alpha / len(coefs1)
+    coefs = (1 - alpha) * coefs1 + alpha * coefs2
+    alpha_i = alpha * coefs2 / coefs
+    # atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
+
+    atoms = Atoms()
+    alpha2 = 1 * alpha
+    for a_i, atom1, atom2 in zip(alpha_i, atoms1, atoms2):
+        atom = GraphAtom()
+        atom.e = np.sqrt((1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2))
+        # atom.e = np.sign(atom1.e) * np.sqrt(
+        #     (1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2)
+        # )
+        atom.R = (1 - alpha2) * atom1.R + alpha2 * atom2.R
+        if not algorithm.unit_trace:
+            atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
+        # atom.R = geodesic_interpolation(atom1.R, atom2.R, alpha2)
+        # atom.R = harmonic_interp(atom1.R, atom2.R, alpha2)
+        # atom.R = log_euclidean_interp(atom1.R, atom2.R, alpha2)
+        # atom.R = project_to_unit_trace(atom.R, data.rho_min, data.rho_max)
+        atom.b = (1 - alpha2) * atom1.b + alpha2 * atom2.b
+
+        atoms.add_atom(atom)
+
+    # for a_i, atom, atom1, atom2 in zip(alpha_i, atoms, atoms1, atoms2):
+    #     atom.R = geodesic_interpolation(atom1.R, atom2.R, a_i)
+    #     atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
+    # # # atoms, coefs = map_to_simplex(atoms, coefs)
+
+    return atoms, coefs
+
+
+def create_random_atoms(n, d, c, num_atoms):
+    atoms = Atoms()
+    coefs = Coefs()
+    for _ in range(num_atoms):
+        atom = GraphAtom()
+        atom.initialize(n, d, c)
+        atoms.add_atom(atom)
+
+    coefs = n * np.random.rand(num_atoms)
+    coefs = project_to_simplex(coefs, n)
+    coefs = Coefs(coefs)
+    return atoms, coefs
+
+
+def create_similar_atoms(graph: Graph, num_atoms):
+    atoms = Atoms()
+    coefs = Coefs()
+    c = graph.num_classes
+    Rv = graph.cov
+    n = graph.num_nodes
+    d = graph.num_features
+    for _ in range(num_atoms):
+        atom = GraphAtom()
+        atom.e = np.ones(n)
+        RR = np.einsum("ijk,i->jk", Rv, atom.e**2)
+        RR = project_to_psd_cone(RR, data.rho_min, data.rho_max)
+        atom.R = np.eye(d)
+        atom.b = np.zeros((n, graph.num_clusters))
+        node_ids = np.arange(n)
+        atom.b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
+        a = np.einsum("i, ij-> j", atom.e**2, atom.b)
+        atom.b = np.zeros(graph.num_classes, dtype=float)
+        atom.b[np.argmax(a)] = 1
+
+        atoms.add_atom(atom)
+
+    coefs = np.ones(num_atoms)
+    coefs = project_to_simplex(coefs, n)
+    coefs = Coefs(coefs)
+    return atoms, coefs
+
+
+def create_optimal_atoms(graph: Graph):
+    atoms = Atoms()
+    coefs = Coefs()
+    E = graph.E
+    # E[np.abs(E) < 0.00001] = 0.00001
+    # R = graph.Ri_matrices
+    # b = graph.b
+    c = graph.num_classes
+    Rv = graph.cov
+    n = graph.num_nodes
+    d = graph.num_features
+
+    for i in range(c):
+        atom0 = GraphAtom()
+        e = E[:, i]
+        RR = np.einsum("ijk,i->jk", Rv, e**2)
+        if algorithm.unit_trace:
+            if algorithm.independent_rho:
+                RR = project_to_unit_trace(RR) + np.eye(d) + data.rho_min
+
+            else:
+                RR = project_to_unit_trace(RR, data.rho_min, data.rho_max)
+        else:
+            RR = project_to_psd_cone(RR, data.rho_min, data.rho_max)
+
+        b = np.zeros((n, graph.num_clusters))
+        node_ids = np.arange(n)
+        b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
+        a = np.einsum("i, ij-> j", e**2, b)
+        b = np.zeros(graph.num_classes, dtype=float)
+        b[np.argmax(a)] = 1
+
+        atom0.set_params(e, RR, b)
+        atoms.add_atom(atom0)
+        coefs.add_coef(graph.λ[i])
+    return atoms, coefs
+
+
+def run_spectral_clustering(graph, n_clusters):
+    """
+    Run spectral clustering on the graph's adjacency matrix.
+
+    Args:
+        graph (SBM): The graph object.
+        n_clusters (int): The number of clusters.
+
+    Returns:
+        np.ndarray: The cluster labels for each node.
+    """
+    adjacency_matrix = graph.A
+    spectral = SpectralClustering(
+        n_clusters=n_clusters, affinity="precomputed", assign_labels="kmeans"
+    )
+    labels = spectral.fit_predict(adjacency_matrix)
+    return labels
+
+
+def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
+    atoms = Atoms()
+    coefs = Coefs()
+    n = graph.num_nodes
+    Rv = graph.cov
+    for i in range(graph.num_clusters):
+        atom = GraphAtom()
+        # atom.initialize(graph.num_nodes, graph.num_features, graph.num_clusters)
+        mask = cluster_labels == i
+        coef = np.sum(mask)
+        atom.e = np.zeros(n)
+        atom.e[mask] = 1
+        atom.e /= np.linalg.norm(atom.e)
+        atom.R = np.einsum("ijk,i->jk", Rv, atom.e**2)
+        atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
+
+        b = np.zeros((n, graph.num_clusters))
+        node_ids = np.arange(n)
+        b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
+        a = np.einsum("i, ij-> j", atom.e**2, b)
+        atom.b = np.zeros(graph.num_classes, dtype=float)
+        atom.b[np.argmax(a)] = 1
+        atoms.add_atom(atom)
+        coefs.add_coef(coef)
+    return atoms, coefs
+
+
+def line_search(
+    atoms1, coefs1, atoms2, coefs2, f, alpha_high_limit=1, max_steps=10, tol=1e-5
+):
+    """
+    Perform line search to find the optimal step size alpha that minimizes f.
+
+    Args:
+        atoms1: Current atoms.
+        coefs1: Current coefficients.
+        atoms2: New atoms (direction).
+        coefs2: New coefficients (direction).
+        f: Objective function to minimize.
+        max_steps: Maximum number of steps for the line search.
+        tol: Tolerance for convergence.
+
+    Returns:
+        atoms: Updated atoms after applying the optimal step size.
+        coefs: Updated coefficients after applying the optimal step size.
+        alpha: Optimal step size.
+    """
+
+    alpha_low = 0
+    alpha_high = alpha_high_limit
+
+    atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
+    sig_low = atoms_low.calc_sig(coefs_low)
+    f1 = f(sig_low)
+
+    atoms_high, coefs_high = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_high)
+    sig_high = atoms_high.calc_sig(coefs_high)
+    f2 = f(sig_high)
+
+    # Perform the golden-section search
+    for _ in range(max_steps):
+        if abs(alpha_high - alpha_low) < tol:
+            break
+
+        if f1 > f2:
+            alpha_low = 0.5 * (alpha_high + alpha_low)
+            atoms_low, coefs_low = interpolate(
+                atoms1, coefs1, atoms2, coefs2, alpha_low
+            )
+            sig_low = atoms_low.calc_sig(coefs_low)
+            f1 = f(sig_low)
+        else:
+            alpha_high = 0.5 * (alpha_high + alpha_low)
+
+            atoms_high, coefs_high = interpolate(
+                atoms1, coefs1, atoms2, coefs2, alpha_high
+            )
+            sig_high = atoms_high.calc_sig(coefs_high)
+            f2 = f(sig_high)
+
+    # Choose the best alpha
+    if f1 < f2:
+        alpha = alpha_low
+    else:
+        alpha = alpha_high
+
+    # Update atoms and coefficients using the optimal alpha
+    atoms, coefs = interpolate(atoms1, coefs1, atoms2, coefs2, alpha)
+
+    return atoms, coefs
+
+
+def find_diagonal_scaling(eps, c_new, max_iter=1000, tol=1e-12):
+    """
+    Solve for the diagonal entries t_v > 0 (v=1..n) that satisfy:
+        sum_{i=1..k} c_new[i] * (t_v^2 * eps[i,v]^2) / (sum_{u=1}^n t_u^2 * eps[i,u]^2) = 1  for each v=1..n.
+
+    Parameters:
+    -----------
+    eps     : (k, n) array
+              The original k unit vectors eps_i in R^n (row-wise).
+    c_new   : (k,) array
+              The new coefficients that sum to n.
+    max_iter: int
+              Maximum number of fixed-point iterations to perform.
+    tol     : float
+              Convergence tolerance on the change in t_v from one iteration to the next.
+
+    Returns:
+    --------
+    t       : (n,) array
+              The converged solution for the diagonal scaling factors.
+    """
+    n, k = eps.shape
+
+    # Initialize t_v = 1.0 as a simple starting guess
+    t = np.ones(n, dtype=np.float64)
+
+    # bar = tqdm(total=max_iter)
+    for _ in range(max_iter):
+        # Compute G_i(t) = sum_{u=1}^n t_u^2 * eps[i,u]^2 for each i
+        # shape: (k,)
+        G = np.sum(t[:, None] * eps, axis=0)
+
+        # Update each t_v via fixed-point formula
+        t_new = 1.0 / np.sum(c_new[None, :] * eps / G[None, :], axis=1)
+
+        # Check convergence
+        loss = np.max(np.abs(t_new - t))
+        # bar.set_postfix(loss=loss)
+        # bar.update(1)
+        if loss < tol:
+            t = t_new
+            return t
+
+        raise NotImplementedError
+
+    return t
+
+
+def construct_tilde_epsilon(eps, t):
+    """
+    Given eps (k x n) and the diagonal scaling vector t (n,),
+    construct tilde_eps[i] = D * eps[i] / ||D * eps[i]||, where D = diag(t).
+
+    Returns tilde_eps (k x n).
+    """
+    # (k,n) times (n,) [broadcast over columns], i.e. scale each column of eps by t
+    scaled = eps * t[:, None]  # shape (k,n)
+
+    # Norm of each row
+    norms = np.sum(scaled, axis=0, keepdims=True)  # shape (k,1)
+
+    return scaled / norms  # shape (k,n)
+
+
+def F_system(x, eps, c_new):
+    """
+    Returns the vector F(t) of dimension n, where
+       F_v(t) = sum_{i=1}^k [ c_new[i] * t_v^2 * eps[i,v]^2 / G_i(t ) ] - 1
+    and G_i(t) = sum_{u=1}^n t_u^2 * eps[i,u]^2.
+
+    Parameters
+    ----------
+    t      : (n,) array, the unknowns t_v (assumed > 0 ideally).
+    eps    : (k, n) array, original vectors eps_i in R^n (row-wise).
+    c_new  : (k,) array, new coefficients that sum to n.
+
+    Returns
+    -------
+    F_val  : (n,) array, the residuals F_v(t).
+    """
+    n, k = eps.shape
+    t = np.exp(x)
+    # G_i(t) for each i
+    # shape: (k,) => each G_i is sum_{u=1..n} t_u^2 * eps[i,u]^2
+    G = np.sum(t[:, None] * eps, axis=0)
+
+    F_val = np.zeros(n, dtype=np.float64)
+    F_val = np.sum(c_new[None, :] * eps / G[None, :], axis=1) - 1
+    return F_val
+
+
+def solve_t_v(eps, c_new, x_init=None, method="hybr", **root_kwargs):
+    """
+    Solve for x_v in R, with t_v = exp(x_v) > 0, ensuring positivity.
+
+    Uses scipy.optimize.root to solve F_system_in_log_space(x)=0.
+
+    Parameters
+    ----------
+    eps        : (k, n) array
+                 Original vectors eps_i in R^n (row i is eps_i).
+    c_new      : (k,) array
+                 New coefficients that sum to n.
+    x_init     : (n,) array or None
+                 Initial guess in log-space. If None, uses  log(1.0).
+    method     : str
+                 The method passed to `scipy.optimize.root` (e.g. 'hybr', 'lm', 'broyden1', 'krylov').
+    **root_kwargs:
+                 Additional keyword arguments for `scipy.optimize.root`.
+
+    Returns
+    -------
+    t_sol      : (n,) array
+                 The positive solution for t_v = exp(x_v).
+    success    : bool
+                 True if the solver succeeded.
+    res        : OptimizeResult
+                 Full result object from `root`.
+    """
+    k, n = eps.shape
+
+    # If no initial guess, start with all zero in log-space => t_v=exp(0)=1
+    if x_init is None:
+        x_init = np.zeros(n, dtype=np.float64)
+
+    # Solve for x via a root-finding method
+    res = root(F_system, x_init, args=(eps, c_new), method=method, **root_kwargs)
+    success = res.success
+
+    # Convert x -> t
+    t_sol = np.exp(res.x)
+
+    return t_sol, success, res
+
+
+def find_eps(E, c_new):
+    n, k = E.shape
+    eps = E**2
+    # -- Solve for t:
+    # t = find_diagonal_scaling(eps, c_new, max_iter=2000, tol=1e-14)
+    x_init = np.log(np.ones(n))  # i.e. t=1 initially
+    t, success, res = solve_t_v(eps, c_new, x_init=x_init, method="broyden1")
+    if not success:
+        raise RuntimeError(res.message)
+
+    # -- Construct tilde_eps:
+    tilde_eps = construct_tilde_epsilon(eps, t)
+
+    Piv = c_new[None, :] * tilde_eps
+
+    Piv = project_to_simplex(Piv, 1)
+    tilde_eps, tilde_c = Piv2EC(Piv)
+
+    return tilde_eps, tilde_c
+
+
+def schedule_lr(
+    ii,
+    max_iter=algorithm.iters,
+    min_lr=optimizer.min,
+    max_lr=optimizer.lr,
+    warmup_steps=algorithm.warmup_steps,
+    decay_steps=optimizer.decay_steps,
+    decay_rate=optimizer.decay_rate,
+    method=optimizer.method,
+    # method="exponential",
+    # method="cosine",
+):
+    if method == "cosine":
+        lr = min_lr + 0.5 * (max_lr - min_lr) * (
+            1 + np.cos(np.pi * (ii - warmup_steps) / (max_iter - warmup_steps))
+        )
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+    elif method == "linear":
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+        else:
+            lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+    elif method == "exponential":
+        lr = max_lr + (min_lr - max_lr) * (ii / max_iter)
+        if ii < warmup_steps:
+            lr = max_lr + (min_lr - max_lr) * (ii / warmup_steps)
+        elif ii < max_iter - decay_steps:
+            lr = max_lr
+        else:
+            lr = max_lr + (min_lr - max_lr) * np.exp(
+                -decay_rate * (ii - max_iter + decay_steps)
+            )
+    return lr

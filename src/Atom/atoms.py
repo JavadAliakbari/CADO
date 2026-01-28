@@ -8,10 +8,8 @@ from utils.utils import *
 
 
 class Atoms:
-    def __init__(
-        self,
-    ) -> None:
-        self.atoms: List[Atom] = []
+    def __init__(self, atoms=None) -> None:
+        self.atoms: List[Atom] = atoms if atoms is not None else []
 
     def __len__(self):
         return len(self.atoms)
@@ -21,6 +19,68 @@ class Atoms:
 
     def __getitem__(self, idx):
         return self.atoms[idx]
+
+    def __add__(self, atoms_):
+        atoms = Atoms()
+        for atom1, atom2 in zip(self.atoms, atoms_):
+            atom = atom1 + atom2
+            atoms.add_atom(atom)
+
+        return atoms
+
+    def __sub__(self, atoms_):
+        atoms = Atoms()
+        for atom1, atom2 in zip(self.atoms, atoms_):
+            atom = atom1 - atom2
+            atoms.add_atom(atom)
+
+        return atoms
+
+    def __mul__(self, c):
+        atoms = Atoms()
+        if isinstance(c, (int, float)):  # Check if c is a scalar
+            for atom1 in self.atoms:
+                atom = atom1 * c
+                atoms.add_atom(atom)
+        elif isinstance(
+            c, (list, np.ndarray, Coefs)
+        ):  # Check if c is a list or np.array
+            if len(c) != len(self.atoms):
+                raise ValueError("Length of c must match the number of atoms.")
+            for atom1, ci in zip(self.atoms, c):
+                atom = atom1 * ci
+                atoms.add_atom(atom)
+        else:
+            raise TypeError("c must be a scalar, list, or numpy array.")
+
+        return atoms
+
+    def __rmul__(self, c):
+        atoms = Atoms()
+        if isinstance(c, (int, float)):  # Check if c is a scalar
+            for atom1 in self.atoms:
+                atom = atom1 * c
+                atoms.add_atom(atom)
+        elif isinstance(
+            c, (list, np.ndarray, Coefs)
+        ):  # Check if c is a list or np.array
+            if len(c) != len(self.atoms):
+                raise ValueError("Length of c must match the number of atoms.")
+            for atom1, ci in zip(self.atoms, c):
+                atom = atom1 * ci
+                atoms.add_atom(atom)
+        else:
+            raise TypeError("c must be a scalar, list, or numpy array.")
+
+        return atoms
+
+    # def __rmul__(self, c):
+    #     atoms = Atoms()
+    #     for atom1 in self.atoms:
+    #         atom = atom1 * c
+    #         atoms.add_atom(atom)
+
+    #     return atoms
 
     def shuffle(self):
         np.random.shuffle(self.atoms)
@@ -47,8 +107,4 @@ class Atoms:
             [c * atom.calc_sig_term() for atom, c in zip(self.atoms, coefs.get_coefs())]
         )
 
-        sig.Rv += config.rho_min * np.eye(sig.Rv.shape[-1])[None, :]
-
         return sig
-    
-    

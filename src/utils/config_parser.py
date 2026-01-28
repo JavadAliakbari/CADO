@@ -4,41 +4,62 @@ import yaml
 class Config:
     def __init__(self, path="config/config.yml"):
         self.config = Config.load_config(path)
-        self.mu1 = self.config["mu1"]
-        self.mu2 = self.config["mu2"]
-        self.iner_iter_GA_R = self.config["iner_iter_GA_R"]
-        self.iner_step_GA_R = self.config["iner_step_GA_R"]
-        self.iter_or_cycles_to_find_next_atom = self.config[
-            "iter_or_cycles_to_find_next_atom"
-        ]
-        self.rho_min = self.config["rho_min"]
-        self.rho_max = self.config["rho_max"]
-        self.sig_rho_min = self.config["sig_rho_min"]
-        self.sig_rho_max = self.config["sig_rho_max"]
+        # Load data configurations
+        self.data = DataConfig(self.config["data"])
+        # Load algorithm configurations
+        self.algorithm = AlgorithmConfig(self.config["algorithm"])
+        # Load optimizer configurations
+        self.optimizer = OptimizerConfig(self.config["optimizer"])
 
-        self.tau = self.config["tau"]
-        self.eta = self.config["eta"]
-        self.cogent_iters = self.config["cogent_iters"]
-        self.noise_level_Ri = self.config["noise_level_Ri"]
-        self.include_rhos = self.config["include_rhos"]
-        self.GP_iters = self.config["GP_iters"]
-        self.GP_tol = self.config["GP_tol"]
-        self.alpha = self.config["alpha"]
-        self.beta = self.config["beta"]
-        self.line_search = self.config["line_search"]
-        self.local_iter = self.config["local_iter"]
-        self.eps = self.config["eps"]
-        self.enhance = self.config["Enhance"]
-        self.Abar = self.config["Abar"]
-        self.ADMM = self.config["ADMM"]
-        self.train_ratio = self.config["train_ratio"]
-        self.lr = self.config["lr"]
-        self.p = self.config["p"]
-        self.q = self.config["q"]
-        self.ADMM_iter = self.config["ADMM_iter"]
-
+    @staticmethod
     def load_config(path):
         with open(path) as f:
             config = yaml.load(f, yaml.FullLoader)
-
         return config
+
+
+class OptimizerConfig:
+    def __init__(self, config):
+        self.type = config["type"]
+        self.lr = config["learning_rate"]["initial"]
+        self.min = config["learning_rate"]["min"]
+        self.decay_rate = config["learning_rate"]["decay_rate"]
+        self.decay_steps = config["learning_rate"]["decay_steps"]
+        self.beta1 = config["adam"]["beta1"]
+        self.beta2 = config["adam"]["beta2"]
+        self.epsilon = config["adam"]["epsilon"]
+        self.momentum = config["sgd"]["momentum"]
+        self.method = config["learning_rate"]["method"]
+
+
+class DataConfig:
+    def __init__(self, config):
+        self.samples_per_cluster = config["samples_per_cluster"]
+        self.num_features = config["num_features"]
+        self.num_signal_features = config["num_signal_features"]
+        self.train_ratio = config["train_ratio"]
+        self.p = config["p"]
+        self.q = config["q"]
+        self.mu0 = config["mu0"]
+        self.mu1 = config["mu1"]
+        self.mu2 = config["mu2"]
+        self.rho_min = config["rho_min"]
+        self.rho_max = config["rho_max"]
+        self.sig_rho_min = config["sig_rho_min"]
+        self.sig_rho_max = config["sig_rho_max"]
+
+
+class AlgorithmConfig:
+    def __init__(self, config):
+        self.warmup_steps = config["warmup_steps"]
+        self.momentum_beta = config["momentum_beta"]
+        self.mu_lr_max = config["mu_lr_max"]
+        self.mu_lr_min = config["mu_lr_min"]
+        self.min_mu = config["min_mu"]
+        self.soft_assign_s = config["soft_assign_s"]
+        self.iters = config["iters"]
+        self.Abar = config["Abar"]
+        self.warm_start = config["warm_start"]
+        self.normalize = config["normalize"]
+        self.unit_trace = config["unit_trace"]
+        self.independent_rho = config["independent_rho"]
