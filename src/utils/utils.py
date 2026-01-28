@@ -5,7 +5,7 @@ import pickle as pkl
 import random
 import shutil
 
-import cvxpy as cp
+# import cvxpy as cp
 from dotenv import load_dotenv
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
@@ -90,7 +90,7 @@ def calc_accuracy(y_pred, y_true):
     return sum(y_pred == y_true) / len(y_true)
 
 
-def clustring_accuracy(y_pred, y_true):
+def clustering_accuracy(y_pred, y_true):
     # --- map cluster IDs to class IDs with Hungarian matching ---
     cm = confusion_matrix(y_true, y_pred)
     row_ind, col_ind = linear_assignment(cm.max() - cm)  # maximize matches
@@ -180,44 +180,6 @@ def create_Ri_symmetric_matrix_with_constrained_trace(
 
     # Create rho_minus random orthogonal matrix Q using QR decomposition
     Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
-
-    # Construct the symmetric matrix using A = Q * Lambda * Q.T
-    Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
-    symmetric_matrix = Q @ Lambda @ Q.T
-
-    return symmetric_matrix
-
-
-def create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
-    dimension,
-    rho_minus,
-    rho_plus,
-    num_signal_features,
-    Q=None,
-):
-    """
-    Create a symmetric matrix with eigenvalues between rho_minus and rho_plus.
-
-    Parameters:
-    dimension (int): Size of the matrix (n x n).
-    rho_minus (float): Lower bound of the eigenvalues.
-    rho_plus  (float): Upper bound of the eigenvalues.
-    noise_level (float): The scale of the noise to be added (small value to slightly perturb).
-    include_extremes (bool): If True, include rho_minus and rho_plus as exact eigenvalues.
-
-    Returns:
-    np.ndarray: The symmetric matrix with eigenvalues in the range [rho_minus, rho_plus].
-    """
-    # signal_eigenvalues = np.random.uniform(rho_plus, 2 * rho_plus, 2)
-    signal_eigenvalues = np.array(num_signal_features * [rho_plus])
-    noise_eigenvalues = np.array([rho_minus] * (dimension - num_signal_features))
-    # noise_eigenvalues = np.random.uniform(0, rho_minus, dimension - 2)
-    all_eigenvalues = np.concatenate((signal_eigenvalues, noise_eigenvalues))
-
-    if Q is None:
-        Q, _ = np.linalg.qr(np.random.randn(dimension, dimension))
-
-    # Create rho_minus random orthogonal matrix Q using QR decomposition
 
     # Construct the symmetric matrix using A = Q * Lambda * Q.T
     Lambda = np.diag(all_eigenvalues)  # Diagonal matrix of eigenvalues
@@ -343,6 +305,25 @@ def project_to_unit_vector(vector):
     return vector / np.linalg.norm(vector)
 
 
+def project_to_ball(vector, radius):
+    """
+    Project a vector onto a ball of given radius.
+    If ||vector|| > radius, scale it to have norm = radius.
+    Otherwise, return the vector unchanged.
+
+    Parameters:
+    vector (np.ndarray): The input vector to be projected.
+    radius (float): The radius of the ball.
+
+    Returns:
+    np.ndarray: The projected vector with norm <= radius.
+    """
+    norm = np.linalg.norm(vector)
+    if norm > radius:
+        return vector * (radius / norm)
+    return vector
+
+
 def project_to_psd_cone(matrix, rho_minus, rho_plus):
     """
     Project a matrix onto the positive semidefinite cone.
@@ -410,24 +391,6 @@ def project_to_simplex(y, a=1):
     y[y < 0] = 0
     y *= a * np.sum(y) ** -1
     return y
-
-
-def project_inside_simplex2(λ0, E, a):
-    n, c = E.shape
-    ones = a * np.ones(n)  # RHS of inequality constraints
-
-    λ_var = cp.Variable(c)
-    # Define the objective function
-    objective = cp.Minimize(0.5 * cp.sum_squares(λ_var - λ0))
-
-    # Define constraints
-    constraints = [E @ λ_var <= ones]
-
-    # Solve the optimization problem
-    problem = cp.Problem(objective, constraints)
-    problem.solve()
-
-    return λ_var.value
 
 
 def project_inside_simplex(y, a):
@@ -581,7 +544,8 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
         f"atom {id}": {
             "e": str(np.round(atom.e, 2)),
             "b": str(np.round(atom.b, 2)),
-            "R": str(np.round(np.linalg.eigvalsh(atom.R), 2)),
+            "theta": str(np.round(atom.theta, 2)),
+            "||theta||": f"{np.linalg.norm(atom.theta):.2f}",
             "λ": str(np.round(c, 2)),
         }
         for id, (c, atom) in enumerate(zip(coefs, atoms))
@@ -613,7 +577,6 @@ def plot_results(
     epsilons,
     components,
     save_path,
-    num_sig_features,
     y_preds,
     Qs,
     *opt_params,
@@ -709,23 +672,35 @@ def plot_results(
 
     ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25), dpi=dpi)
 
-    visualize_high_dim_data(
-        graph.X,
-        y_preds,
-        graph.y,
-        Qs,
-        num_sig_features=num_sig_features,
-        save_path=save_path,
+    # Visualize k-means clustering with cluster centers
+    from utils.visualize_R import (
+        visualize_kmeans_clustering,
+        visualize_kmeans_clustering_2d,
     )
-    # visualize_high_dim_data2(
-    #     graph.X,
-    #     y_preds,
-    #     graph.y,
-    #     Qs,
-    #     num_sig_features=num_sig_features,
-    #     save_path=save_path,
-    # )
-    # visualize_high_dim_data2(graph.X, y_pred, graph.y, Q)
+
+    if graph.X.shape[1] == 2:
+        # 2D visualization with tau constraint circles
+        visualize_kmeans_clustering_2d(
+            graph.X,
+            y_preds,
+            graph.y,
+            Qs,  # Contains cluster centers (theta)
+            tau=data.tau,
+            filename="kmeans_clustering_2d.html",
+            reduction_method="pca",
+            save_path=save_path,
+        )
+    else:
+        # 3D visualization
+        visualize_kmeans_clustering(
+            graph.X,
+            y_preds,
+            graph.y,
+            Qs,  # Now contains cluster centers (theta) instead of subspaces
+            filename="kmeans_clustering_3d.html",
+            reduction_method="pca" if graph.X.shape[1] != 3 else None,
+            save_path=save_path,
+        )
 
 
 def save_model_params(atoms, coefs, graph, save_path):

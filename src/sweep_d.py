@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 from idea5 import CANO
 from plot_files2 import plot
 from utils.SBM import SBM
-from utils.utils import clustring_accuracy, data
+from utils.utils import clustering_accuracy, data
 from utils.algorithm_utils import create_random_atoms, run_spectral_clustering
 from utils.utils import data, save_path, save_config
 

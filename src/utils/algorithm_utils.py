@@ -46,13 +46,10 @@ def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
         # atom.e = np.sign(atom1.e) * np.sqrt(
         #     (1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2)
         # )
-        atom.R = (1 - alpha2) * atom1.R + alpha2 * atom2.R
-        if not algorithm.unit_trace:
-            atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
-        # atom.R = geodesic_interpolation(atom1.R, atom2.R, alpha2)
-        # atom.R = harmonic_interp(atom1.R, atom2.R, alpha2)
-        # atom.R = log_euclidean_interp(atom1.R, atom2.R, alpha2)
-        # atom.R = project_to_unit_trace(atom.R, data.rho_min, data.rho_max)
+        # Linear interpolation of theta (k-means centers)
+        atom.theta = (1 - alpha2) * atom1.theta + alpha2 * atom2.theta
+        # Project theta to satisfy norm constraint
+        atom.theta = project_to_ball(atom.theta, data.tau)
         atom.b = (1 - alpha2) * atom1.b + alpha2 * atom2.b
 
         atoms.add_atom(atom)
@@ -89,9 +86,9 @@ def create_similar_atoms(graph: Graph, num_atoms):
     for _ in range(num_atoms):
         atom = GraphAtom()
         atom.e = np.ones(n)
-        RR = np.einsum("ijk,i->jk", Rv, atom.e**2)
-        RR = project_to_psd_cone(RR, data.rho_min, data.rho_max)
-        atom.R = np.eye(d)
+        # Initialize theta as a random vector with norm <= tau
+        atom.theta = np.random.randn(d)
+        atom.theta = project_to_ball(atom.theta, data.tau)
         atom.b = np.zeros((n, graph.num_clusters))
         node_ids = np.arange(n)
         atom.b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
@@ -111,26 +108,21 @@ def create_optimal_atoms(graph: Graph):
     atoms = Atoms()
     coefs = Coefs()
     E = graph.E
-    # E[np.abs(E) < 0.00001] = 0.00001
-    # R = graph.Ri_matrices
-    # b = graph.b
     c = graph.num_classes
-    Rv = graph.cov
     n = graph.num_nodes
     d = graph.num_features
 
     for i in range(c):
         atom0 = GraphAtom()
         e = E[:, i]
-        RR = np.einsum("ijk,i->jk", Rv, e**2)
-        if algorithm.unit_trace:
-            if algorithm.independent_rho:
-                RR = project_to_unit_trace(RR) + np.eye(d) + data.rho_min
 
-            else:
-                RR = project_to_unit_trace(RR, data.rho_min, data.rho_max)
-        else:
-            RR = project_to_psd_cone(RR, data.rho_min, data.rho_max)
+        # Compute optimal cluster center as weighted mean of features
+        weights = e**2  # (n,)
+        theta = np.einsum("i,ij->j", weights, graph.X)  # Weighted mean: (d,)
+        theta = theta / np.sum(weights)  # Normalize by sum of weights
+
+        # Project theta to satisfy norm constraint
+        theta = project_to_ball(theta, data.tau)
 
         b = np.zeros((n, graph.num_clusters))
         node_ids = np.arange(n)
@@ -139,7 +131,7 @@ def create_optimal_atoms(graph: Graph):
         b = np.zeros(graph.num_classes, dtype=float)
         b[np.argmax(a)] = 1
 
-        atom0.set_params(e, RR, b)
+        atom0.set_params(e, theta, b)
         atoms.add_atom(atom0)
         coefs.add_coef(graph.λ[i])
     return atoms, coefs
@@ -168,7 +160,7 @@ def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
     atoms = Atoms()
     coefs = Coefs()
     n = graph.num_nodes
-    Rv = graph.cov
+    d = graph.num_features
     for i in range(graph.num_clusters):
         atom = GraphAtom()
         # atom.initialize(graph.num_nodes, graph.num_features, graph.num_clusters)
@@ -177,8 +169,16 @@ def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
         atom.e = np.zeros(n)
         atom.e[mask] = 1
         atom.e /= np.linalg.norm(atom.e)
-        atom.R = np.einsum("ijk,i->jk", Rv, atom.e**2)
-        atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
+
+        # Compute cluster center as weighted mean of features
+        cluster_features = graph.X[mask]
+        if len(cluster_features) > 0:
+            atom.theta = np.mean(cluster_features, axis=0)
+        else:
+            atom.theta = np.random.randn(d)
+
+        # Project theta to satisfy norm constraint
+        atom.theta = project_to_ball(atom.theta, data.tau)
 
         b = np.zeros((n, graph.num_clusters))
         node_ids = np.arange(n)

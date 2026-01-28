@@ -13,12 +13,12 @@ class GraphAtom(Atom):
         self.optimizer = get_optimizer(optimizer.type)
         self.r = None
 
-    def set_params(self, e, R, b) -> None:
+    def set_params(self, e, theta, b) -> None:
         self.e = e
-        self.R = R
+        self.theta = theta
         self.b = b
         self.n = e.shape[0]
-        self.d = R.shape[0]
+        self.d = theta.shape[0]
         self.c = b.shape[0]
 
     def initialize(self, n, d, c):
@@ -30,23 +30,9 @@ class GraphAtom(Atom):
         self.e = np.random.randn(self.n)
         self.e /= np.linalg.norm(self.e)
 
-        if algorithm.unit_trace:
-            if algorithm.independent_rho:
-                self.R = (
-                    create_Ri_symmetric_matrix_with_constrained_trace(self.d)
-                    + np.eye(d) * data.rho_min
-                )
-            else:
-                self.R = create_Ri_symmetric_matrix_with_constrained_trace(
-                    self.d, data.rho_min, data.rho_max
-                )
-        else:
-            self.R = create_Ri_symmetric_matrix_with_constrained_eigenvalues(
-                self.d,
-                data.rho_min,
-                data.rho_max,
-                noise_level=0.0,
-            )
+        # Initialize theta as a random d-dimensional vector with norm <= tau
+        self.theta = np.random.randn(self.d)
+        self.theta = project_to_ball(self.theta, data.tau)
 
         self.b = create_multiple_noisy_probability_vectors(1, self.c, noise_level=1)[0]
 
@@ -58,8 +44,10 @@ class GraphAtom(Atom):
         return OuterProduct(self.e)
 
     def R_term(self):
-        if self.R is not None:
-            return np.einsum("i,jk->ijk", ((self.e**2)), self.R)
+        """Returns cluster centers for each node: u_v = e_i^2 * theta"""
+        if self.theta is not None:
+            # Return (n x d) matrix of cluster centers, one for each node
+            return np.einsum("i,j->ij", (self.e**2), self.theta)
         else:
             return None
 
@@ -77,16 +65,17 @@ class GraphAtom(Atom):
         if grad_sig is None:
             return 0
         grad_ei = self.calc_grad_ei(grad_sig)
-        grad_Ri = self.calc_grad_Ri(grad_sig.Rv)
+        grad_theta_i = self.calc_grad_theta_i(grad_sig.u_v)
         grad_bi = self.calc_grad_bi(grad_sig.pi)
 
         grad = GraphAtom()
-        grad.set_params(grad_ei, grad_Ri, grad_bi)
+        grad.set_params(grad_ei, grad_theta_i, grad_bi)
         return grad
 
     def calc_grad_ei(self, grad_sig: GraphSig):
-        if self.R is not None and grad_sig.Rv is not None:
-            tmp1 = np.einsum("ijk,jk->i", grad_sig.Rv, self.R)
+        if self.theta is not None and grad_sig.u_v is not None:
+            # grad_u_v is (n x d), theta is (d,)
+            tmp1 = np.einsum("ij,j->i", grad_sig.u_v, self.theta)
         else:
             tmp1 = 0
 
@@ -106,11 +95,12 @@ class GraphAtom(Atom):
                 plt.savefig(f"{save_path}x{i}.png")
         return grad_ei
 
-    def calc_grad_Ri(self, grad_Rv):
-        if grad_Rv is not None:
-            grad_Ri = np.einsum("ijk,i->jk", grad_Rv, self.e**2)
-
-            return grad_Ri
+    def calc_grad_theta_i(self, grad_u_v):
+        """Compute gradient w.r.t. theta: grad_theta = sum_v (e_v^2 * grad_u_v)"""
+        if grad_u_v is not None:
+            # grad_u_v is (n x d), e^2 is (n,)
+            grad_theta = np.einsum("ij,i->j", grad_u_v, self.e**2)
+            return grad_theta
         else:
             return None
 
@@ -123,21 +113,21 @@ class GraphAtom(Atom):
         """Update atom parameters using optimizer or gradient descent
 
         Args:
-            grad: Gradient object with e, R, and b attributes
+            grad: Gradient object with e, theta, and b attributes
             lr (float): Learning rate
             use_optimizer (bool): Whether to use optimizer or standard gradient descent
         """
         # Collect parameters and gradients as dictionaries for the optimizer
-        params = {"e": self.e, "R": self.R, "b": self.b}
+        params = {"e": self.e, "theta": self.theta, "b": self.b}
 
-        gradients = {"e": grad.e, "R": grad.R, "b": grad.b}
+        gradients = {"e": grad.e, "theta": grad.theta, "b": grad.b}
 
         # Use optimizer to update parameters
         updated_params = self.optimizer.step(params, gradients)
 
         # Apply updates
         self.e = updated_params["e"]
-        self.R = updated_params["R"]
+        self.theta = updated_params["theta"]
         self.b = updated_params["b"]
 
         # Project to ensure constraints are satisfied
@@ -145,7 +135,8 @@ class GraphAtom(Atom):
 
     def project_to_bound(self):
         self.e = project_to_unit_vector(self.e)
-        self.R = project_to_psd_cone(self.R, data.rho_min, data.rho_max)
+        # Project theta to have norm <= tau
+        self.theta = project_to_ball(self.theta, data.tau)
         self.b = project_to_simplex(self.b, 1)
 
     def reset_optimizer_state(self):
@@ -153,17 +144,16 @@ class GraphAtom(Atom):
         self.optimizer.reset()
 
     def __str__(self):
-        return f"e: {self.e}, b: {self.b}, R: {np.round(np.linalg.eigvalsh(self.R), 2)}"
+        return f"e: {self.e}, b: {self.b}, theta: {np.round(self.theta, 2)}, ||theta||: {np.linalg.norm(self.theta):.2f}"
 
-    ## Step 1: Fix R and b, update epsilon
+    ## Step 1: Fix theta and b, update epsilon
     def update_e(self, grad: GraphSig, iter=0, itr=0):
-        scale_factor = (data.rho_max / data.rho_min) ** 2
-        if self.R is not None:
-            tmp1 = np.einsum("ijk,jk->i", grad.Rv, self.R)
+        if self.theta is not None:
+            # grad.u_v is (n x d), theta is (d,)
+            tmp1 = np.einsum("ij,j->i", grad.u_v, self.theta)
         else:
             tmp1 = 0
 
-        tmp1 /= scale_factor
         tmp2 = np.einsum("ij,j->i", grad.pi, self.b)
         tmp3 = grad.L + np.diag(tmp1 + tmp2)
         N = tmp3.shape[0]
@@ -186,34 +176,22 @@ class GraphAtom(Atom):
 
         return λ
 
-    ## Step 2: Fix epsilon and b, update R
-    def update_R(self, grad_Rv):
-        if grad_Rv is None:
+    ## Step 2: Fix epsilon and b, update theta
+    def update_theta(self, grad_u_v):
+        """Update theta to minimize objective with constraint ||theta|| <= tau"""
+        if grad_u_v is None:
             return
-        grad_R = self.calc_grad_Ri(grad_Rv)
+        grad_theta = self.calc_grad_theta_i(grad_u_v)
 
-        S, U = np.linalg.eigh(grad_R)
-
-        if algorithm.unit_trace:
-            if algorithm.independent_rho:
-                self.R = (
-                    np.outer(U[:, 0], U[:, 0]) + np.eye(self.R.shape[0]) * data.rho_min
-                )
-            else:
-                if self.r is None:
-                    self.r = water_filling(data.rho_min, data.rho_max, len(S))
-                self.R = np.einsum("i,ji,ki->jk", self.r, U, U)
+        # For constrained optimization: theta = -tau * grad_theta / ||grad_theta||
+        # if the unconstrained solution violates the constraint
+        grad_norm = np.linalg.norm(grad_theta)
+        if grad_norm > 0:
+            # Optimal solution: theta in direction of -grad_theta
+            self.theta = -data.tau * grad_theta / grad_norm
         else:
-            mask1 = S < 0
-            # mask1 = S < S[2]
-            S[mask1] = data.rho_max
-            S[~mask1] = data.rho_min
-            # S /= np.sum(S)
-            self.R = np.einsum("i,ji,ki->jk", S, U, U)
-
-            # S[mask1] = data.rho_max -  data.rho_min
-            # S[~mask1] = 0
-            # self.R = U @ np.diag(S) @ U.T + data.rho_min * np.eye(self.R.shape[0])
+            # If gradient is zero, keep current theta
+            pass
 
     ## Step 3: Fix epsilon and R, update b (closed-form solution)
     def update_b(self, grad_pi):
@@ -223,26 +201,25 @@ class GraphAtom(Atom):
 
     def __add__(self, atom_):
         e = np.sqrt(self.e**2 + atom_.e**2)
-        R = self.R + atom_.R
+        theta = self.theta + atom_.theta
         b = self.b + atom_.b
-        # R = project_to_psd_cone(R, data.rho_min, data.rho_max)
 
         atom = GraphAtom()
-        atom.set_params(e, R, b)
+        atom.set_params(e, theta, b)
         return atom
 
     def __mul__(self, c):
         e = np.sqrt(c) * self.e
-        R = c * self.R
+        theta = c * self.theta
         b = c * self.b
         atom = GraphAtom()
-        atom.set_params(e, R, b)
+        atom.set_params(e, theta, b)
         return atom
 
     def __rmul__(self, c):
         e = np.sqrt(c) * self.e
-        R = c * self.R
+        theta = c * self.theta
         b = c * self.b
         atom = GraphAtom()
-        atom.set_params(e, R, b)
+        atom.set_params(e, theta, b)
         return atom

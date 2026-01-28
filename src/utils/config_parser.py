@@ -43,10 +43,9 @@ class DataConfig:
         self.mu0 = config["mu0"]
         self.mu1 = config["mu1"]
         self.mu2 = config["mu2"]
-        self.rho_min = config["rho_min"]
-        self.rho_max = config["rho_max"]
-        self.sig_rho_min = config["sig_rho_min"]
-        self.sig_rho_max = config["sig_rho_max"]
+        self.tau = config["tau"]
+        self.gmm_center_min = config["gmm_center_min"]
+        self.gmm_sigma = config["gmm_sigma"]
 
 
 class AlgorithmConfig:

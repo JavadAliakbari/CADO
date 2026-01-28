@@ -1,7 +1,7 @@
 data:
   samples_per_cluster: [300, 300, 300]  # Number of samples per cluster
   # samples_per_cluster: [600, 400, 200]
-  num_features: 6
+  num_features: 2
   num_signal_features: 2
   train_ratio: 0.2
   p: 0.25
@@ -9,14 +9,11 @@ data:
   mu0: 0.4
   mu1: 1.0
   mu2: 5.5
-  rho_min: 0.04                    
-  rho_max: 1.0
-  sig_rho_min: 0.04                    
-  sig_rho_max: 10
-  gmm_center_min: 2.0              # Minimum value for GMM cluster centers
+  tau: 1.0                        # Maximum norm for k-means centers (||theta|| <= tau)
+  gmm_center_min: 3.0              # Minimum value for GMM cluster centers
   gmm_sigma: 1.0                   # Fixed sigma for GMM  
 algorithm:
-  iters: 500               
+  iters: 200               
   warmup_steps: 500
   momentum_beta: 0.9
   mu_lr_max: 1e-6

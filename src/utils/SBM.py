@@ -4,7 +4,6 @@ import scipy.sparse as sp
 
 from utils.graph import Graph
 from utils.utils import (
-    create_Ri_symmetric_matrix_with_constrained_eigenvalues2,
     create_multiple_noisy_probability_vectors,
     data,
 )
@@ -59,10 +58,7 @@ class SBM(Graph):
         block_sizes,
         probs,
         num_features,
-        num_signal_features,
         train_ratio=1,
-        rho_min=data.sig_rho_min,
-        rho_max=data.sig_rho_max,
         gmm_center_min=None,
         gmm_sigma=None,
     ) -> None:
@@ -71,7 +67,6 @@ class SBM(Graph):
         self.block_sizes = block_sizes
         self.probs = probs
         self.num_features = num_features
-        self.num_signal_features = num_signal_features
         self.num_classes = len(block_sizes)
         self.num_clusters = self.num_classes
         self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
@@ -85,10 +80,7 @@ class SBM(Graph):
         )
 
         self.X /= np.linalg.norm(self.X, axis=1)[:, None]
-        self.cov = (
-            np.einsum("ij,ik->ijk", self.X, self.X)
-            # - data.rho_min * np.eye(self.num_features)[None, :]
-        )
+        self.cov = np.einsum("ij,ik->ijk", self.X, self.X)
 
         self.train_labels = self.y[self.train_mask]
         self.train_nodes = np.arange(self.num_nodes)[self.train_mask]
@@ -148,39 +140,6 @@ class SBM(Graph):
         E = eigenvectors[:, top_indices]
 
         return A, Abar, Lambda, E
-
-    def create_features(self):
-        ## Generate symmetric matrices Ri
-        Ri_matrices = np.stack(
-            [
-                create_Ri_symmetric_matrix_with_constrained_eigenvalues2(
-                    self.num_features,
-                    self.rho_min,
-                    self.rho_max,
-                    self.num_signal_features,
-                )
-                for _ in range(self.num_clusters)
-            ],
-            axis=0,
-        )
-
-        ## Calculate Rv based on the provided expression
-        Rv_matrices = (
-            np.einsum("ij,jkn->ikn", ((self.E**2) @ np.diag(self.λ)), Ri_matrices)
-            # + data.rho_min * np.eye(self.num_features)[None, :]
-        )
-
-        # Generate feature vectors X based on the multivariate normal distribution
-        X = np.array(
-            [
-                np.random.multivariate_normal(
-                    mean=np.zeros(self.num_features), cov=Rv, size=1
-                ).flatten()
-                for Rv in Rv_matrices
-            ]
-        )
-
-        return Ri_matrices, Rv_matrices, X
 
     def create_labels(self):
         ## Generate the probability vector matrix b and generate matrix pi based on the provided expression

@@ -67,7 +67,7 @@ def update(
         new_atoms[idx].e = new_E[:, idx]
         # new_sig = sig - new_atoms[idx].calc_sig_term()
         # new_grad = f.calc_grad(new_sig, need_L=False)
-        new_atoms[idx].update_R(grad.Rv)
+        new_atoms[idx].update_theta(grad.u_v)
         new_atoms[idx].update_b(grad.pi)
 
     if lr_search:
@@ -146,7 +146,7 @@ def CANO(
         if mu2 is None or mu2 == 0:
             E = np.array([atom.e for atom in atoms])
             y_pred = np.argmax(E, axis=0)
-            acc = clustring_accuracy(y_pred, graph.y)
+            acc = clustering_accuracy(y_pred, graph.y)
         else:
             y_pred = np.argmax(sig.pi, axis=1)
             y_pred_test = y_pred[graph.test_mask]
@@ -161,7 +161,8 @@ def CANO(
             "f_opt": f"{f_opt:,.4f}",
         }
         # y_pred = np.argmax(sig.pi, axis=1)
-        Q = np.array([np.linalg.eigh(atom.R)[1] for atom in atoms])
+        # Store theta (k-means centers) instead of eigenvectors
+        Q = np.array([atom.theta for atom in atoms])
 
         if log_results:
             bar.set_postfix(results)

@@ -23,13 +23,13 @@ class GraphFunc(f):
             return 0
 
         L_term = self.calc_L(signal)
-        R_term = self.calc_R(signal)
+        u_term = self.calc_u(signal)
         pi_term = self.calc_pi(signal)
 
-        obj = L_term + R_term + pi_term
+        obj = L_term + u_term + pi_term
 
         if components:
-            return obj, L_term, R_term, pi_term
+            return obj, L_term, u_term, pi_term
         else:
             return obj
 
@@ -43,30 +43,18 @@ class GraphFunc(f):
 
         return self.mu0 * L_term
 
-    def calc_R(self, signal: GraphSig):
-        normalizer = signal.d**2 if algorithm.normalize else 1
-        if self.mu1 != 0:
-            batch_size = 512
-            n = signal.Rv.shape[0]
-            d = signal.Rv.shape[-1]
-            term_2_val = 0
-            for start in range(0, n, batch_size):
-                end = start + batch_size
-                batch_Rv = signal.Rv[start:end]
-                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
-                batch_Rv_inv = np.linalg.solve(batch_Rv, I_batch)
-                batch_cov = self.graph.cov[start:end]
-                term_2_val += np.einsum("ijk,ijk->", batch_cov, batch_Rv_inv)
-            term_2 = term_2_val / normalizer
-
-            # Use slogdet to compute term_3
-            _, logdet = np.linalg.slogdet(signal.Rv)
-            term_3 = np.sum(logdet) / normalizer
+    def calc_u(self, signal: GraphSig):
+        """K-means objective: 0.5 * sum_v ||x_v - u_v||^2"""
+        normalizer = signal.d if algorithm.normalize else 1
+        if self.mu1 != 0 and signal.u_v is not None:
+            # Compute the squared distance between features and cluster centers
+            # X: (n x d), u_v: (n x d)
+            diff = self.graph.X - signal.u_v  # (n x d)
+            kmeans_term = 0.5 * np.sum(diff**2) / normalizer
         else:
-            term_2 = 0
-            term_3 = 0
+            kmeans_term = 0
 
-        return self.mu1 * term_2 + self.mu1 * term_3
+        return self.mu1 * kmeans_term
 
     def calc_pi(self, signal: GraphSig):
         normalizer = signal.c if algorithm.normalize else 1
@@ -89,9 +77,9 @@ class GraphFunc(f):
             grad_L = self.calc_grad_L(signal)
         else:
             grad_L = None
-        grad_R = self.calc_grad_R(signal)
+        grad_u = self.calc_grad_u(signal)
         grad_pi = self.grad_pi
-        grad = GraphSig(grad_L, grad_R, grad_pi)
+        grad = GraphSig(grad_L, grad_u, grad_pi)
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
@@ -102,26 +90,14 @@ class GraphFunc(f):
         else:
             return self.mu0 * (-self.graph.A + signal.L) / normalizer
 
-    def calc_grad_R(self, signal: GraphSig):
-        normalizer = signal.d**2 if algorithm.normalize else 1
-        if self.mu1 != 0:
-            d = signal.Rv.shape[-1]
-            n = signal.Rv.shape[0]
-
-            batch_size = 512
-
-            gradient_Rv = np.empty_like(signal.Rv)
-            for start in range(0, n, batch_size):
-                end = start + batch_size
-                batch_Rv = signal.Rv[start:end]
-                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
-                X = np.linalg.solve(batch_Rv, I_batch)
-                cov_batch = self.graph.cov[start:end]
-                Y = np.matmul(cov_batch, X)
-                X2 = np.linalg.solve(batch_Rv, Y)
-                # gradient_Rv[start:end] = I_batch - X2
-                gradient_Rv[start:end] = X - X2
-            return self.mu1 * gradient_Rv / normalizer
+    def calc_grad_u(self, signal: GraphSig):
+        """Gradient of k-means objective w.r.t. u_v: -(x_v - u_v)"""
+        normalizer = signal.d if algorithm.normalize else 1
+        if self.mu1 != 0 and signal.u_v is not None:
+            # Gradient w.r.t. u_v is: -(X - u_v)
+            diff = self.graph.X - signal.u_v  # (n x d)
+            gradient_u_v = -diff  # (n x d)
+            return self.mu1 * gradient_u_v / normalizer
         else:
             return None
 
@@ -135,13 +111,13 @@ class GraphFunc(f):
         train_labels = self.graph.train_labels
         train_nodes = self.graph.train_nodes
         gradient_pi[train_nodes, train_labels] = 1
-        gradient_pi /= (np.sum(gradient_pi, axis=0)[None, :] + 1e-10)
+        gradient_pi /= np.sum(gradient_pi, axis=0)[None, :] + 1e-10
 
         return -self.mu2 * gradient_pi / normalizer
 
-    def update_mu0(self, new_mu1):
-        """Update the mu1 parameter value"""
-        self.mu1 = new_mu1
+    def update_mu0(self, new_mu0):
+        """Update the mu0 parameter value"""
+        self.mu0 = new_mu0
 
     def calc_grad_mu0(self, signal: GraphSig):
         """Calculate gradient of the function with respect to mu0"""
@@ -159,26 +135,13 @@ class GraphFunc(f):
         self.mu1 = new_mu1
 
     def calc_grad_mu1(self, signal: GraphSig):
-        normalizer = signal.d**2 if algorithm.normalize else 1
-        if self.mu1 != 0:
-            batch_size = 512
-            n = signal.Rv.shape[0]
-            d = signal.Rv.shape[-1]
-            term_2_val = 0
-            for start in range(0, n, batch_size):
-                end = start + batch_size
-                batch_Rv = signal.Rv[start:end]
-                I_batch = np.broadcast_to(np.eye(d), batch_Rv.shape)
-                batch_Rv_inv = np.linalg.solve(batch_Rv, I_batch)
-                batch_cov = self.graph.cov[start:end]
-                term_2_val += np.einsum("ijk,ijk->", batch_cov, batch_Rv_inv)
-            term_2 = term_2_val / normalizer
-
-            # Use slogdet to compute term_3
-            _, logdet = np.linalg.slogdet(signal.Rv)
-            term_3 = np.sum(logdet) / normalizer
+        """Gradient w.r.t. mu1 for k-means objective"""
+        normalizer = signal.d if algorithm.normalize else 1
+        if self.mu1 != 0 and signal.u_v is not None:
+            # Compute the k-means term
+            diff = self.graph.X - signal.u_v
+            kmeans_term = 0.5 * np.sum(diff**2) / normalizer
         else:
-            term_2 = 0
-            term_3 = 0
+            kmeans_term = 0
 
-        return term_2 + term_3
+        return kmeans_term

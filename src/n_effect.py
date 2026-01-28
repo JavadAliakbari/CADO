@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 from idea5 import CANO
 from utils.SBM import SBM
-from utils.utils import clustring_accuracy, data, save_path, save_config
+from utils.utils import clustering_accuracy, data, save_path, save_config
 from utils.algorithm_utils import create_random_atoms, run_spectral_clustering
 
 
@@ -106,7 +106,7 @@ def run_single(run, p, node_scale):
 
         # Run spectral clustering for comparison
         cluster_labels = run_spectral_clustering(graph, c)
-        sc_acc = clustring_accuracy(cluster_labels, graph.y)
+        sc_acc = clustering_accuracy(cluster_labels, graph.y)
 
         # Return results including the node scale
         return {

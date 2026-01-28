@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 from idea5 import CANO
 from plot_files2 import plot
 from utils.SBM import SBM
-from utils.utils import clustring_accuracy, data
+from utils.utils import clustering_accuracy, data
 from utils.algorithm_utils import create_random_atoms, run_spectral_clustering
 from utils.utils import data, save_path, save_config
 
@@ -94,7 +94,7 @@ def run_single(run, n):
     # Compute ARI for spectral clustering
     # Perform spectral clustering using the graph's adjacency matrix (assumed to be graph.A)
     cluster_labels = run_spectral_clustering(graph, c)
-    sc_acc = clustring_accuracy(cluster_labels, graph.y)
+    sc_acc = clustering_accuracy(cluster_labels, graph.y)
 
     return {
         "n": np.round(n, 2),

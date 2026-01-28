@@ -13,7 +13,6 @@ if __name__ == "__main__":
     # Use SBM configuration fields
     samples_per_cluster = data.samples_per_cluster
     num_features = data.num_features
-    num_signal_features = data.num_signal_features
     n = sum(samples_per_cluster)
     c = len(samples_per_cluster)
     n_clusters = c
@@ -24,7 +23,6 @@ if __name__ == "__main__":
         samples_per_cluster,
         probs,
         num_features,
-        num_signal_features,
         train_ratio=data.train_ratio,
     )
     plot_adj(graph.A, name="A")
@@ -32,7 +30,7 @@ if __name__ == "__main__":
     # Run spectral clustering
     n_clusters = c  # Number of clusters
     cluster_labels = run_spectral_clustering(graph, n_clusters)
-    ari = clustring_accuracy(graph.y, cluster_labels)
+    ari = clustering_accuracy(graph.y, cluster_labels)
     plt.figure()
     plt.plot(cluster_labels)
     plt.title("Cluster labels")
@@ -82,7 +80,6 @@ if __name__ == "__main__":
         epsilsons,
         components,
         save_path,
-        num_signal_features,
         *R_params,
         *opt_params,
     )
