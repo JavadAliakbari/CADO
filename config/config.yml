@@ -1,26 +1,26 @@
 data:
-  samples_per_cluster: [500, 500, 500]  # Number of samples per cluster
+  samples_per_cluster: [1000, 1000, 1000]  # Number of samples per cluster
   # samples_per_cluster: [600, 400, 200]
-  num_features: 2
+  num_features: 6
   num_signal_features: 2
-  train_ratio: 0.31
-  p: 0.65
+  train_ratio: 0.5
+  p: 0.1
   q: 0.05
-  mu0: 0.0
+  mu0: 1
   mu1: 1.0
-  mu2: 1.
+  mu2: 0.1
   tau: 1.5                        # Maximum norm for k-means centers (||theta|| <= tau)
   gmm_center_min: 4.0              # Minimum radius for GMM cluster centers from origin
   gmm_min_separation: 0.6          # Minimum distance between cluster centers
   gmm_sigma: 0.5                   # Fixed sigma for GMM  
 algorithm:
-  iters: 250               
+  iters: 150               
   warmup_steps: 500
   momentum_beta: 0.9
   mu_lr_max: 1e-6
   mu_lr_min: 1e-12
   min_mu: 1e-4
-  soft_assign_s: 0.25
+  soft_assign_s: 10
   # warm_start: "optimal"                  # "optimal" or "random" or "cluster"
   warm_start: "random"                  # "optimal" or "random" or "cluster"
   Abar: True

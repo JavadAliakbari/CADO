@@ -62,10 +62,9 @@ class GraphFunc(f):
             train_labels = self.graph.train_labels
             train_nodes = self.graph.train_nodes
             term_4 = np.sum(signal.pi[train_nodes, train_labels]) / normalizer
+            return -self.mu2 * term_4 / train_nodes.shape[0]
         else:
-            term_4 = 0
-
-        return -self.mu2 * term_4 / train_nodes.shape[0]
+            return 0
 
     def calc_grad(self, signal, need_L=True) -> GraphSig:
         if signal is None:

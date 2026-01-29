@@ -50,7 +50,7 @@ class OuterProduct:
     def __mul__(self, c):
         if isinstance(c, (int, float)):
             return OuterProduct(self.vector, self.coef * c)
-        elif isinstance(c, (np.ndarray, SparseAbar)):
+        elif isinstance(c, np.ndarray) or c.__class__.__name__ == "SparseAbar":
             # Faster implementation using two dot products instead of np.einsum
             dot_product = c @ self.vector
             return self.coef * (self.vector @ dot_product)
@@ -97,8 +97,10 @@ class LazyOuterSum:
     def __mul__(self, c):
         if isinstance(c, (int, float)):
             return LazyOuterSum([term * c for term in self.terms])
-        elif isinstance(c, (np.ndarray, SparseAbar)):
+        elif isinstance(c, np.ndarray) or c.__class__.__name__ == "SparseAbar":
             return sum([term * c for term in self.terms])
+        else:
+            return np.array(self) * c
 
     def __rmul__(self, c):
         return self * c

@@ -1,6 +1,6 @@
 import numpy as np
 
-from idea5 import CANO
+from CADO import CADO
 from load_atom import load_atom
 from utils.algorithm_utils import *
 from utils.SBM import SBM
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         components,
         opt_params,
         R_params,
-    ) = CANO(
+    ) = CADO(
         graph,
         atoms,
         log_results=True,

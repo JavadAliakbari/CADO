@@ -20,9 +20,9 @@ from utils.config_parser import Config
 from utils.logger import getLOGGER
 from utils.visualize_R import *
 
-seed = 10
-random.seed(seed)
-np.random.seed(seed)
+# seed = 10
+# random.seed(seed)
+# np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -31,8 +31,8 @@ data = config.data
 algorithm = config.algorithm
 optimizer = config.optimizer
 
-# plot = os.environ.get("PLOT") == "True"
-plot = True
+plot = os.environ.get("PLOT") == "True"
+# plot = True
 
 plt.rcParams["figure.figsize"] = [16, 9]
 plt.rcParams["figure.dpi"] = 100  # 200 e.g. is really fine, but slower

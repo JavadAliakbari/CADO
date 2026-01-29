@@ -1,102 +1,97 @@
 from copy import deepcopy
-
 import numpy as np
 from tqdm import tqdm
 from scipy.special import softmax
 
 from Graph_Atom.graph_func import GraphFunc
+from Graph_Atom.graph_sig import GraphSig
 from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def update(atoms: Atoms, f: GraphFunc):
-    # ss = np.array([np.sign(atom.e) for atom in atoms]).T
+def clac_grad_ei(grad_sig: GraphSig, atom: Atoms, e):
+    if grad_sig.u_v is not None:
+        tmp1 = np.einsum("ij,j->i", grad_sig.u_v, atom.theta)
+    else:
+        tmp1 = 0
+    tmp2 = np.einsum("ij,j->i", grad_sig.pi, atom.b)
+
+    grad_ei_1 = (tmp1 + tmp2) * e
+    grad_ei_2 = grad_sig.L @ e
+    # grad_ei_2 = np.einsum("ij, j-> i", grad_sig.L, self.e)
+    grad_ei = grad_ei_1 + grad_ei_2
+    return grad_ei
+
+
+def norm1_update(grad, atoms: Atoms, ii: int = 0, soft_assignment=True):
+    # coefs = [sum(atom.e**2) for atom in atoms]
+    # E = np.array([atom.e / np.sqrt(c) for atom, c in zip(atoms, coefs)])
+    # grad_Piv = np.array(
+    #     [
+    #         coef * clac_grad_ei(grad, atom, e) ** 1
+    #         for atom, e, coef in zip(atoms, E, coefs)
+    #     ]
+    # ).T
+    grad_Piv = np.array([(atom.calc_grad_ei(grad) ** 1) for atom in atoms]).T
+
+    if soft_assignment:
+        grad_norm = np.linalg.norm(grad_Piv)
+        s = algorithm.soft_assign_s
+        temperature = max(1e-5, (1 - s * ii / algorithm.iters)) * grad_norm
+        new_Piv = softmax(-grad_Piv / temperature, axis=1)
+        new_Piv = project_to_simplex(new_Piv, 1)
+    else:
+        # Convert argmin to one-hot matrix
+        min_indices = np.argmin(grad_Piv, axis=1)
+        new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
+    new_E = np.sqrt(new_Piv)
+
+    return new_E
+
+
+def update(
+    atoms: Atoms,
+    f: GraphFunc,
+    ii: int = 0,
+    soft_assignment=True,
+    norm2=False,
+):
     sig = atoms.calc_sig()
     grad = f.calc_grad(sig)
 
-    # Continue with normal atom and coef updates
-    # grad_Piv = []
-    # for coef, atom in zip(coefs, atoms):
-    #     atom_sig = atom.calc_sig_term()
-    #     new_sig = sig - atom_sig
-    #     new_grad = f.calc_grad(new_sig)
-    #     grad_c = np.abs(new_grad @ atom_sig)
-    #     grad_e = grad_c * (atom.calc_grad_ei(new_grad) ** 1)
-    #     grad_Piv.append(grad_e)
+    if norm2:
+        grad_Piv = np.array([(atom.calc_grad_ei(grad) ** 1) for atom in atoms]).T
+        new_E = -grad_Piv / np.linalg.norm(grad_Piv, axis=1, keepdims=True)
+    else:
+        new_E = norm1_update(grad, atoms, ii, soft_assignment)
 
-    # grad_Piv = np.array(grad_Piv).T
-
-    grad_Piv = np.array([(atom.calc_grad_ei(grad) ** 1) for atom in atoms]).T
-    new_E = -grad_Piv / np.linalg.norm(grad_Piv, axis=1, keepdims=True)
-
-    # if plot:
-    #     plt.figure()
-    #     for idx in range(grad_Piv.shape[1]):
-    #         plt.plot(grad_Piv[:, idx], label=f"Atom {idx}")
-    #         plt.title(f"Gradient for atoms")
-    #     plt.legend()
-    #     plt.savefig(f"{save_path}/grad_atoms_iter_{ii}.png")
-    # grad_coefs = np.abs([grad @ atom.calc_sig_term() for atom in atoms]).T
-    # grad_Piv = np.array(
-    #     [
-    #         grad_coef * (atom.calc_grad_ei(grad) ** 1)
-    #         for grad_coef, atom in zip(grad_coefs, atoms)
-    #     ]
-    # ).T
-    # Apply momentum to gradient if we have previous gradient
-    # if prev_grad is not None:
-    #     grad_Piv = momentum_beta * prev_grad + (1 - momentum_beta) * grad_Piv
-
-    # grad_norm = np.linalg.norm(grad_Piv)
-    # if soft_assignment:
-    #     s = algorithm.soft_assign_s
-    #     temperature = max(1e-5, (s - s * ii / algorithm.iters)) * grad_norm
-    #     new_Piv = softmax(-grad_Piv / temperature, axis=1)
-    #     new_Piv = project_to_simplex(new_Piv, 1)
-    # else:
-    #     # Convert argmin to one-hot matrix
-    #     min_indices = np.argmin(grad_Piv, axis=1)
-    #     new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    # new_E, new_c = Piv2EC(new_Piv**2)
-
-    # if plot:
-    #     plt.figure()
-    #     for idx in range(new_E.shape[1]):
-    #         plt.plot(new_E[:, idx], label=f"Atom {idx}")
-    #         plt.title(f"New assignment for atoms")
-    #     plt.legend()
-    #     plt.savefig(f"{save_path}/new_assignment_atoms_iter_{ii}.png")
-
-    # new_coefs = Coefs(new_c)
-    # new_atoms = deepcopy(atoms)
     X_i = np.einsum("ik,ij->kj", new_E**2, f.graph.X)
     y_i = np.einsum(
         "ik,ij->kj", new_E[f.graph.train_nodes] ** 2, f.graph.pi[f.graph.train_nodes]
     )
 
+    new_atoms = deepcopy(atoms)
     for idx in range(len(atoms)):
-        atoms[idx].e = new_E[:, idx]
-        atoms[idx].theta = project_to_ball(X_i[idx], data.tau)
-        b = np.zeros(f.graph.pi.shape[1], dtype=float)
-        b[np.argmax(y_i[idx])] = 1
-        atoms[idx].b = b
+        new_atoms[idx].e = new_E[:, idx]
+        # atoms[idx].update_theta(grad.u_v)
+        # atoms[idx].update_b(grad.pi)
+        new_atoms[idx].theta = project_to_ball(X_i[idx], data.tau)
+        new_atoms[idx].b = np.zeros(f.graph.pi.shape[1], dtype=float)
+        new_atoms[idx].b[np.argmax(y_i[idx])] = 1
 
-    # if lr_search:
-    #     alpha = schedule_lr(ii)
-    #     atoms = line_search(atoms, new_atoms, f, alpha)
-    # else:
-    # alpha = schedule_lr(ii)
-    # atoms = interpolate(atoms, new_atoms, alpha)
+    # alpha = 2 / (ii + 2)
+    alpha = schedule_lr(ii)
+    atoms = interpolate(atoms, new_atoms, alpha)
     # atoms = new_atoms
 
-    # Sort atoms based on np.argmax(atom.b)
-    # sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
-    # atoms = Atoms([atoms[i] for i in sort_indices])
+    # Sort atoms and coefs based on np.argmax(atom.b)
+    sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
+    atoms = Atoms([atoms[i] for i in sort_indices])
 
     return atoms
 
 
-def CANO(
+def CADO(
     graph,
     atoms=None,
     log_results=True,
@@ -138,7 +133,7 @@ def CANO(
     ).tolist()
 
     for ii in range(algorithm.iters):
-        atoms = update(atoms, f)
+        atoms = update(atoms, f, ii)
 
         sig = atoms.calc_sig()
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
