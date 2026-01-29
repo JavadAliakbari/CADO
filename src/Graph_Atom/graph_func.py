@@ -34,7 +34,7 @@ class GraphFunc(f):
             return obj
 
     def calc_L(self, signal: GraphSig):
-        normalizer = signal.n if algorithm.normalize else 1
+        normalizer = (signal.n**2) if algorithm.normalize else 1
         if algorithm.Abar:
             L_term = -matrix_dot_product(signal.L, self.graph.Abar) / normalizer
         else:
@@ -50,7 +50,7 @@ class GraphFunc(f):
             # Compute the squared distance between features and cluster centers
             # X: (n x d), u_v: (n x d)
             diff = self.graph.X - signal.u_v  # (n x d)
-            kmeans_term = 0.5 * np.sum(diff**2) / normalizer
+            kmeans_term = 0.5 * np.mean(diff**2) / normalizer
         else:
             kmeans_term = 0
 
@@ -65,10 +65,7 @@ class GraphFunc(f):
         else:
             term_4 = 0
 
-        return -self.mu2 * term_4
-
-    def calc_cov(self):
-        return self.graph.cov
+        return -self.mu2 * term_4 / train_nodes.shape[0]
 
     def calc_grad(self, signal, need_L=True) -> GraphSig:
         if signal is None:
@@ -83,7 +80,9 @@ class GraphFunc(f):
         return grad
 
     def calc_grad_L(self, signal: GraphSig):
-        normalizer = signal.n * (self.p) * (1 - self.q) if algorithm.normalize else 1
+        normalizer = (
+            (signal.n**2) * (self.p) * (1 - self.q) if algorithm.normalize else 1
+        )
 
         if algorithm.Abar:
             return self.mu0 * (-self.graph.Abar) / normalizer
@@ -96,7 +95,7 @@ class GraphFunc(f):
         if self.mu1 != 0 and signal.u_v is not None:
             # Gradient w.r.t. u_v is: -(X - u_v)
             diff = self.graph.X - signal.u_v  # (n x d)
-            gradient_u_v = -diff  # (n x d)
+            gradient_u_v = -diff / signal.n  # (n x d)
             return self.mu1 * gradient_u_v / normalizer
         else:
             return None
@@ -140,7 +139,7 @@ class GraphFunc(f):
         if self.mu1 != 0 and signal.u_v is not None:
             # Compute the k-means term
             diff = self.graph.X - signal.u_v
-            kmeans_term = 0.5 * np.sum(diff**2) / normalizer
+            kmeans_term = 0.5 * np.mean(diff**2) / normalizer
         else:
             kmeans_term = 0
 

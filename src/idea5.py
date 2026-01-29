@@ -9,18 +9,9 @@ from utils.algorithm_utils import *
 from utils.utils import *
 
 
-def update(
-    atoms: Atoms,
-    coefs: Coefs,
-    f,
-    ii,
-    prev_grad=None,
-    momentum_beta=0.9,
-    soft_assignment=True,
-    lr_search=True,
-):
+def update(atoms: Atoms, f: GraphFunc):
     # ss = np.array([np.sign(atom.e) for atom in atoms]).T
-    sig = atoms.calc_sig(coefs)
+    sig = atoms.calc_sig()
     grad = f.calc_grad(sig)
 
     # Continue with normal atom and coef updates
@@ -35,9 +26,16 @@ def update(
 
     # grad_Piv = np.array(grad_Piv).T
 
-    grad_Piv = np.array(
-        [coef * (atom.calc_grad_ei(grad) ** 1) for coef, atom in zip(coefs, atoms)]
-    ).T
+    grad_Piv = np.array([(atom.calc_grad_ei(grad) ** 1) for atom in atoms]).T
+    new_E = -grad_Piv / np.linalg.norm(grad_Piv, axis=1, keepdims=True)
+
+    # if plot:
+    #     plt.figure()
+    #     for idx in range(grad_Piv.shape[1]):
+    #         plt.plot(grad_Piv[:, idx], label=f"Atom {idx}")
+    #         plt.title(f"Gradient for atoms")
+    #     plt.legend()
+    #     plt.savefig(f"{save_path}/grad_atoms_iter_{ii}.png")
     # grad_coefs = np.abs([grad @ atom.calc_sig_term() for atom in atoms]).T
     # grad_Piv = np.array(
     #     [
@@ -46,50 +44,61 @@ def update(
     #     ]
     # ).T
     # Apply momentum to gradient if we have previous gradient
-    if prev_grad is not None:
-        grad_Piv = momentum_beta * prev_grad + (1 - momentum_beta) * grad_Piv
-    grad_norm = np.linalg.norm(grad_Piv)
+    # if prev_grad is not None:
+    #     grad_Piv = momentum_beta * prev_grad + (1 - momentum_beta) * grad_Piv
 
-    if soft_assignment:
-        s = algorithm.soft_assign_s
-        temperature = max(1e-5, (1 - s * ii / algorithm.iters)) * grad_norm
-        new_Piv = softmax(-grad_Piv / temperature, axis=1)
-        new_Piv = project_to_simplex(new_Piv, 1)
-    else:
-        # Convert argmin to one-hot matrix
-        min_indices = np.argmin(grad_Piv, axis=1)
-        new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
-    new_E, new_c = Piv2EC(new_Piv)
+    # grad_norm = np.linalg.norm(grad_Piv)
+    # if soft_assignment:
+    #     s = algorithm.soft_assign_s
+    #     temperature = max(1e-5, (s - s * ii / algorithm.iters)) * grad_norm
+    #     new_Piv = softmax(-grad_Piv / temperature, axis=1)
+    #     new_Piv = project_to_simplex(new_Piv, 1)
+    # else:
+    #     # Convert argmin to one-hot matrix
+    #     min_indices = np.argmin(grad_Piv, axis=1)
+    #     new_Piv = np.eye(grad_Piv.shape[1])[min_indices]
+    # new_E, new_c = Piv2EC(new_Piv**2)
 
-    new_coefs = Coefs(new_c)
-    new_atoms = deepcopy(atoms)
+    # if plot:
+    #     plt.figure()
+    #     for idx in range(new_E.shape[1]):
+    #         plt.plot(new_E[:, idx], label=f"Atom {idx}")
+    #         plt.title(f"New assignment for atoms")
+    #     plt.legend()
+    #     plt.savefig(f"{save_path}/new_assignment_atoms_iter_{ii}.png")
+
+    # new_coefs = Coefs(new_c)
+    # new_atoms = deepcopy(atoms)
+    X_i = np.einsum("ik,ij->kj", new_E**2, f.graph.X)
+    y_i = np.einsum(
+        "ik,ij->kj", new_E[f.graph.train_nodes] ** 2, f.graph.pi[f.graph.train_nodes]
+    )
+
     for idx in range(len(atoms)):
-        new_atoms[idx].e = new_E[:, idx]
-        # new_sig = sig - new_atoms[idx].calc_sig_term()
-        # new_grad = f.calc_grad(new_sig, need_L=False)
-        new_atoms[idx].update_theta(grad.u_v)
-        new_atoms[idx].update_b(grad.pi)
+        atoms[idx].e = new_E[:, idx]
+        atoms[idx].theta = project_to_ball(X_i[idx], data.tau)
+        b = np.zeros(f.graph.pi.shape[1], dtype=float)
+        b[np.argmax(y_i[idx])] = 1
+        atoms[idx].b = b
 
-    if lr_search:
-        alpha = schedule_lr(ii)
-        atoms, coefs = line_search(atoms, coefs, new_atoms, new_coefs, f, alpha)
-    else:
-        alpha = schedule_lr(ii)
-        atoms, coefs = interpolate(atoms, coefs, new_atoms, new_coefs, alpha)
+    # if lr_search:
+    #     alpha = schedule_lr(ii)
+    #     atoms = line_search(atoms, new_atoms, f, alpha)
+    # else:
+    # alpha = schedule_lr(ii)
+    # atoms = interpolate(atoms, new_atoms, alpha)
+    # atoms = new_atoms
 
-    # Sort atoms and coefs based on np.argmax(atom.b)
-    sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
-    atoms = Atoms([atoms[i] for i in sort_indices])
-    coefs = Coefs([coefs[i] for i in sort_indices])
+    # Sort atoms based on np.argmax(atom.b)
+    # sort_indices = np.argsort([np.argmax(atom.b) for atom in atoms])
+    # atoms = Atoms([atoms[i] for i in sort_indices])
 
-    return atoms, coefs, grad_Piv
+    return atoms
 
 
 def CANO(
     graph,
     atoms=None,
-    coefs=None,
-    lr_search=True,
     log_results=True,
     leave=True,
     **kwargs,
@@ -101,20 +110,19 @@ def CANO(
     mu2 = kwargs.get("mu2", data.mu2)
     ## Initialization
     if atoms is None:
-        atoms, coefs = create_random_atoms(n, num_features, c, c)
-    atoms_opt, coefs_opt = create_optimal_atoms(graph)
+        atoms = create_random_atoms(n, num_features, c, c)
+    atoms_opt = create_optimal_atoms(graph)
 
-    atoms, coefs = map_to_simplex(atoms, coefs)
-    sig = atoms.calc_sig(coefs)
+    atoms = map_to_simplex(atoms)
+    sig = atoms.calc_sig()
 
     # Initialize GraphFunc with the current mu0 value
     f = GraphFunc(graph=graph, **kwargs)
 
-    opt_sig = atoms_opt.calc_sig(coefs_opt)
+    opt_sig = atoms_opt.calc_sig()
     f_opt, L_opt, R_opt, pi_opt = f(opt_sig, components=True)
 
     f_sig = f(sig)
-    prev_grad = None
 
     if log_results:
         bar = tqdm(total=algorithm.iters, leave=leave)
@@ -130,17 +138,9 @@ def CANO(
     ).tolist()
 
     for ii in range(algorithm.iters):
-        atoms, coefs, current_grad = update(
-            atoms,
-            coefs,
-            f,
-            ii,
-            prev_grad,
-            lr_search=lr_search,
-        )
-        prev_grad = current_grad
+        atoms = update(atoms, f)
 
-        sig = atoms.calc_sig(coefs)
+        sig = atoms.calc_sig()
         f_sig, L_term, R_term, pi_term = f(sig, components=True)
 
         if mu2 is None or mu2 == 0:
@@ -184,7 +184,6 @@ def CANO(
 
     return (
         atoms,
-        coefs,
         graph,
         results,
         f_values,

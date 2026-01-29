@@ -2,7 +2,6 @@ from typing import List
 from Atom.atom import Atom
 from Atom.coefs import Coefs
 from Atom.sig import Sig
-import itertools
 
 from utils.utils import *
 
@@ -100,11 +99,7 @@ class Atoms:
     def remove_idx(self, idx):
         del self.atoms[idx]
 
-    def calc_sig(self, coefs: Coefs) -> Sig:
-        if len(coefs) == 0:
-            return None
-        sig: Sig = sum(
-            [c * atom.calc_sig_term() for atom, c in zip(self.atoms, coefs.get_coefs())]
-        )
+    def calc_sig(self) -> Sig:
+        sig: Sig = sum([atom.calc_sig_term() for atom in self.atoms])
 
         return sig

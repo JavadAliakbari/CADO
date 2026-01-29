@@ -1,8 +1,164 @@
 import numpy as np
 import plotly.graph_objects as go
 from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.patches import Circle
+import os
 
 colors = ["red", "blue", "green", "orange", "cyan", "magenta", "yellow", "black"]
+
+
+def visualize_kmeans_clustering_2d_gif(
+    X,
+    predicted_clusters,  # a list of cluster results over iterations
+    true_clusters,
+    cluster_centers,  # a list of cluster centers arrays (history) - shape (iters, k, d)
+    tau,  # maximum norm constraint for cluster centers
+    filename="kmeans_2d_animation.gif",
+    save_path="results/",
+):
+    """
+    Visualize k-means clustering results in 2D with matplotlib gif animation.
+    Only works for 2D features (X.shape[1] == 2).
+    Shows cluster centers with constraint circles of radius tau.
+
+    Parameters:
+    -----------
+    X : array-like, shape (n_samples, 2)
+        The input data points (must be 2D)
+    predicted_clusters : list of arrays
+        List of predicted cluster assignments over iterations
+    true_clusters : array-like, shape (n_samples,)
+        Ground truth cluster labels
+    cluster_centers : list of arrays
+        List of cluster centers (theta values) over iterations, shape (k, 2) per iteration
+    tau : float
+        Maximum norm constraint for cluster centers (||theta|| <= tau)
+    filename : str
+        Output gif filename
+    save_path : str
+        Directory to save the visualization
+    """
+    # Only work with 2D features
+    if X.shape[1] != 2:
+        print(f"Skipping 2D visualization: data has {X.shape[1]} dimensions, not 2.")
+        return
+
+    # Set fixed axis limits based on X with some padding
+    x_range = X[:, 0].max() - X[:, 0].min()
+    y_range = X[:, 1].max() - X[:, 1].min()
+    padding = 0.15 * max(x_range, y_range)
+
+    x_lim = [float(X[:, 0].min() - padding), float(X[:, 0].max() + padding)]
+    y_lim = [float(X[:, 1].min() - padding), float(X[:, 1].max() + padding)]
+
+    # Ensure both axes have the same range to maintain aspect ratio
+    max_range = max(x_lim[1] - x_lim[0], y_lim[1] - y_lim[0])
+    x_center = (x_lim[0] + x_lim[1]) / 2
+    y_center = (y_lim[0] + y_lim[1]) / 2
+    x_lim = [x_center - max_range / 2, x_center + max_range / 2]
+    y_lim = [y_center - max_range / 2, y_center + max_range / 2]
+
+    k = len(cluster_centers[0])  # Number of clusters
+
+    # Set up the figure and axis
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.set_xlim(x_lim)
+    ax.set_ylim(y_lim)
+    ax.set_xlabel("Feature 1")
+    ax.set_ylabel("Feature 2")
+    ax.set_aspect("equal")
+    ax.grid(True, alpha=0.3)
+
+    # Initialize empty plot elements
+    scatter_correct = [
+        ax.scatter(
+            [], [], c=colors[j % len(colors)], alpha=0.5, s=30, label=f"Cluster {j}"
+        )
+        for j in range(k)
+    ]
+    scatter_incorrect = [
+        ax.scatter([], [], c=colors[j % len(colors)], alpha=0.9, s=40, marker="x")
+        for j in range(k)
+    ]
+    center_points = [
+        ax.scatter(
+            [],
+            [],
+            c=colors[j % len(colors)],
+            s=200,
+            marker="D",
+            edgecolors="black",
+            linewidths=2,
+            zorder=10,
+        )
+        for j in range(k)
+    ]
+    # Single circle around origin with radius tau (constraint ||theta|| <= tau)
+    constraint_circle = Circle(
+        (0, 0),
+        tau,
+        fill=False,
+        color="black",
+        linestyle="--",
+        linewidth=2,
+        alpha=0.7,
+        label=f"Constraint (τ={tau})",
+    )
+    ax.add_patch(constraint_circle)
+
+    # Add legend
+    ax.legend(loc="upper right", fontsize=10)
+
+    # Title with iteration counter
+    title = ax.text(
+        0.5, 1.02, "", transform=ax.transAxes, ha="center", fontsize=14, weight="bold"
+    )
+
+    def update(frame_idx):
+        pred_clust = predicted_clusters[frame_idx]
+        centers = cluster_centers[frame_idx]
+
+        # Update data points for each cluster
+        for j in range(k):
+            idx_correct = (pred_clust == j) & (pred_clust == true_clusters)
+            idx_incorrect = (pred_clust == j) & (pred_clust != true_clusters)
+
+            # Update correct predictions
+            scatter_correct[j].set_offsets(X[idx_correct])
+
+            # Update incorrect predictions
+            scatter_incorrect[j].set_offsets(X[idx_incorrect])
+
+            # Update cluster center
+            center_points[j].set_offsets(centers[j : j + 1])
+
+        # Calculate accuracy
+        accuracy = np.mean(pred_clust == true_clusters)
+        title.set_text(f"Iteration: {frame_idx} | Accuracy: {accuracy:.2%}")
+
+        return (
+            scatter_correct
+            + scatter_incorrect
+            + center_points
+            + [constraint_circle, title]
+        )
+
+    # Reduce the number of frames by skipping some
+    step = max(1, len(predicted_clusters) // 200)
+    frames = range(0, len(predicted_clusters), step)
+
+    # Create animation
+    ani = FuncAnimation(fig, update, frames=frames, interval=50, blit=True, repeat=True)
+
+    # Save as gif
+    os.makedirs(save_path, exist_ok=True)
+    writer = PillowWriter(fps=20)
+    ani.save(f"{save_path}{filename}", writer=writer, dpi=80)
+    plt.close(fig)
+
+    print(f"K-means 2D gif saved to {save_path}{filename}")
 
 
 def visualize_kmeans_clustering_2d(

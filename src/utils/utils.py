@@ -20,9 +20,9 @@ from utils.config_parser import Config
 from utils.logger import getLOGGER
 from utils.visualize_R import *
 
-# seed = 10
-# random.seed(seed)
-# np.random.seed(seed)
+seed = 10
+random.seed(seed)
+np.random.seed(seed)
 
 load_dotenv()
 config_path = os.environ.get("CONFIGPATH")
@@ -31,7 +31,8 @@ data = config.data
 algorithm = config.algorithm
 optimizer = config.optimizer
 
-plot = os.environ.get("PLOT") == "True"
+# plot = os.environ.get("PLOT") == "True"
+plot = True
 
 plt.rcParams["figure.figsize"] = [16, 9]
 plt.rcParams["figure.dpi"] = 100  # 200 e.g. is really fine, but slower
@@ -532,7 +533,7 @@ def plot_adj(A, name="L"):
     plt.savefig(f"{save_path}{name}.png", dpi=300, bbox_inches="tight", pad_inches=0)
 
 
-def log_results(atoms, coefs, graph, results, save_path, terminal=True):
+def log_results(atoms, graph, results, save_path, terminal=True):
     os.makedirs(save_path, exist_ok=True)
     LOGGER = getLOGGER(
         name=f"{now}",
@@ -546,12 +547,11 @@ def log_results(atoms, coefs, graph, results, save_path, terminal=True):
             "b": str(np.round(atom.b, 2)),
             "theta": str(np.round(atom.theta, 2)),
             "||theta||": f"{np.linalg.norm(atom.theta):.2f}",
-            "λ": str(np.round(c, 2)),
         }
-        for id, (c, atom) in enumerate(zip(coefs, atoms))
+        for id, atom in enumerate(atoms)
     }
 
-    sig = atoms.calc_sig(coefs)
+    sig = atoms.calc_sig()
     y_pred = np.argmax(sig.pi, axis=1)
     mask = y_pred == graph.y
     # Replace True with ✔ and False with ✘
@@ -572,17 +572,18 @@ def plot_results(
     f_values,
     accuracies,
     atoms,
-    coefs,
     graph,
     epsilons,
     components,
     save_path,
     y_preds,
     Qs,
+    tau,  # Added tau parameter
     *opt_params,
+    plot_interactive=False,
 ):
     os.makedirs(save_path, exist_ok=True)
-    sig = atoms.calc_sig(coefs)
+    sig = atoms.calc_sig()
     plot_adj(sig.L)
 
     f_opt, L_opt, R_opt, pi_opt = opt_params
@@ -672,46 +673,31 @@ def plot_results(
 
     ani.save(f"{save_path}eigenvectors.gif", writer=PillowWriter(fps=25), dpi=dpi)
 
-    # Visualize k-means clustering with cluster centers
-    from utils.visualize_R import (
-        visualize_kmeans_clustering,
-        visualize_kmeans_clustering_2d,
-    )
+    # if not plot_interactive:
+    #     return
 
+    # Visualize k-means clustering with gif animation for 2D features only
     if graph.X.shape[1] == 2:
-        # 2D visualization with tau constraint circles
-        visualize_kmeans_clustering_2d(
+        from utils.visualize_R import visualize_kmeans_clustering_2d_gif
+
+        visualize_kmeans_clustering_2d_gif(
             graph.X,
             y_preds,
             graph.y,
-            Qs,  # Contains cluster centers (theta)
-            tau=data.tau,
-            filename="kmeans_clustering_2d.html",
-            reduction_method="pca",
+            Qs,  # Contains cluster centers (theta) history
+            tau=tau,
+            filename="kmeans_clustering_2d.gif",
             save_path=save_path,
         )
-    else:
-        # 3D visualization
-        visualize_kmeans_clustering(
-            graph.X,
-            y_preds,
-            graph.y,
-            Qs,  # Now contains cluster centers (theta) instead of subspaces
-            filename="kmeans_clustering_3d.html",
-            reduction_method="pca" if graph.X.shape[1] != 3 else None,
-            save_path=save_path,
-        )
+    # Skip visualization for higher dimensions
 
 
-def save_model_params(atoms, coefs, graph, save_path):
+def save_model_params(atoms, graph, save_path):
     os.makedirs(save_path, exist_ok=True)
     filename = f"{save_path}atoms.pkl"
     with open(filename, "wb") as fid:
         pkl.dump(atoms, fid)
 
-    filename = f"{save_path}coefs.pkl"
-    with open(filename, "wb") as fid:
-        pkl.dump(coefs, fid)
     filename = f"{save_path}graph.pkl"
     with open(filename, "wb") as fid:
         pkl.dump(graph, fid)

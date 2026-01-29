@@ -60,6 +60,7 @@ class SBM(Graph):
         num_features,
         train_ratio=1,
         gmm_center_min=None,
+        gmm_min_separation=None,
         gmm_sigma=None,
     ) -> None:
         num_nodes = sum(block_sizes)
@@ -69,18 +70,19 @@ class SBM(Graph):
         self.num_features = num_features
         self.num_classes = len(block_sizes)
         self.num_clusters = self.num_classes
-        self.A, self.Abar, self.λ_SBM, self.E_SBM = self.create_adjacancy__matrix()
-        self.L_opt, _, self.λ, self.E = self.create_partionioned_graph()
+        self.A, self.Abar, self.E_SBM = self.create_adjacancy__matrix()
+        self.L_opt, _, self.E = self.create_partionioned_graph()
         self.b, self.pi, self.y = self.create_labels()
         self.gmm_center_min = gmm_center_min if gmm_center_min is not None else 2.0
+        self.gmm_min_separation = (
+            gmm_min_separation if gmm_min_separation is not None else 1.0
+        )
         self.gmm_sigma = gmm_sigma if gmm_sigma is not None else 1.0
 
-        self.Ri_matrices, self.Rv_matrices, self.X, self.cluster_centers = (
-            self.create_features_gmm()
-        )
+        self.X, self.cluster_centers = self.create_features_gmm()
 
-        self.X /= np.linalg.norm(self.X, axis=1)[:, None]
-        self.cov = np.einsum("ij,ik->ijk", self.X, self.X)
+        # self.X /= np.linalg.norm(self.X, axis=1)[:, None]
+        # self.cov = np.einsum("ij,ik->ijk", self.X, self.X)
 
         self.train_labels = self.y[self.train_mask]
         self.train_nodes = np.arange(self.num_nodes)[self.train_mask]
@@ -119,7 +121,9 @@ class SBM(Graph):
         Abar = A.copy()
         Abar[Abar == 0] = -1
 
-        return A, Abar, Lambda, E
+        E2 = np.sqrt(Lambda) * E
+
+        return A, Abar, E2
 
     def create_adjacancy__matrix(self):
         K = len(self.block_sizes)
@@ -138,8 +142,9 @@ class SBM(Graph):
         top_indices = np.argsort(eigenvalues)[-K:]
         Lambda = eigenvalues[top_indices]
         E = eigenvectors[:, top_indices]
+        E2 = np.sqrt(Lambda) * E
 
-        return A, Abar, Lambda, E
+        return A, Abar, E2
 
     def create_labels(self):
         ## Generate the probability vector matrix b and generate matrix pi based on the provided expression
@@ -151,7 +156,7 @@ class SBM(Graph):
         # for i, t in enumerate(self.block_sizes):
         #     pi.append(np.repeat(b[i, :][None, :], t, axis=0))
         # pi = np.vstack(pi)
-        pi = ((self.E**2) @ np.diag(self.λ)) @ b
+        pi = (self.E**2) @ b
         # # pi = np.round(pi, 1)
         pi /= np.sum(pi, axis=1)[:, None]
 
@@ -163,35 +168,72 @@ class SBM(Graph):
     def create_features_gmm(self):
         """
         Generate features using Gaussian Mixture Model.
-        Each cluster has a mean vector with values >= gmm_center_min and fixed covariance gmm_sigma^2 * I.
+        Each cluster has a mean vector at distance >= gmm_center_min from origin,
+        and cluster centers are separated by at least gmm_min_separation distance.
+        Fixed covariance gmm_sigma^2 * I.
 
         Returns:
-            Ri_matrices: Covariance matrices for each cluster (num_clusters x num_features x num_features)
-            Rv_matrices: Per-node covariance matrices (num_nodes x num_features x num_features)
             X: Feature matrix (num_nodes x num_features)
             cluster_centers: Mean vectors for each cluster (num_clusters x num_features)
         """
-        # Generate cluster centers with values >= gmm_center_min
+        # Generate cluster centers with separation constraint
         cluster_centers = []
+        max_attempts = 1000
+
         for i in range(self.num_clusters):
-            # Generate random center with values between gmm_center_min and gmm_center_min + random offset
-            center = self.gmm_center_min + np.random.uniform(
-                0, 2, size=self.num_features
-            )
-            cluster_centers.append(center)
+            for attempt in range(max_attempts):
+                # Generate random center at distance gmm_center_min from origin
+                direction = np.random.uniform(-1, 1, size=self.num_features)
+                direction = direction / np.linalg.norm(direction)
+                radius = self.gmm_center_min
+                center = direction * radius
+
+                # Check minimum separation from existing centers
+                if i == 0:
+                    # First center is always valid
+                    cluster_centers.append(center)
+                    break
+                else:
+                    # Check distance to all existing centers
+                    distances = [
+                        np.linalg.norm(center - existing)
+                        for existing in cluster_centers
+                    ]
+                    min_distance = min(distances)
+
+                    if min_distance >= self.gmm_min_separation * self.gmm_center_min:
+                        cluster_centers.append(center)
+                        break
+            else:
+                # If we couldn't find a valid center after max_attempts,
+                # use the best one we found (with maximum minimum distance)
+                best_center = None
+                best_min_dist = 0
+                for _ in range(100):
+                    direction = np.random.uniform(-1, 1, size=self.num_features)
+                    direction = direction / np.linalg.norm(direction)
+                    candidate = direction * self.gmm_center_min
+                    distances = [
+                        np.linalg.norm(candidate - existing)
+                        for existing in cluster_centers
+                    ]
+                    min_dist = min(distances)
+                    if min_dist > best_min_dist:
+                        best_min_dist = min_dist
+                        best_center = candidate
+                cluster_centers.append(best_center)
+                print(
+                    f"Warning: Could not satisfy separation constraint for cluster {i}. "
+                    f"Best separation achieved: {best_min_dist:.3f} (target: {self.gmm_min_separation})"
+                )
+
         cluster_centers = np.array(cluster_centers)
 
         # Fixed covariance matrix for all clusters: sigma^2 * I
         cluster_covariance = (self.gmm_sigma**2) * np.eye(self.num_features)
 
-        # Create Ri_matrices (same for all clusters in this simple GMM)
-        Ri_matrices = np.stack(
-            [cluster_covariance for _ in range(self.num_clusters)], axis=0
-        )
-
         # Generate features for each node based on cluster assignments
         X = []
-        Rv_list = []
 
         start_idx = 0
         for cluster_idx, block_size in enumerate(self.block_sizes):
@@ -203,15 +245,8 @@ class SBM(Graph):
             )
             X.append(cluster_samples)
 
-            # Rv for this cluster (same covariance for all nodes in cluster)
-            Rv_cluster = np.stack(
-                [cluster_covariance for _ in range(block_size)], axis=0
-            )
-            Rv_list.append(Rv_cluster)
-
             start_idx += block_size
 
         X = np.vstack(X)
-        Rv_matrices = np.vstack(Rv_list)
 
-        return Ri_matrices, Rv_matrices, X, cluster_centers
+        return X, cluster_centers

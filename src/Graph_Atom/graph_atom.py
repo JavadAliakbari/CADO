@@ -87,12 +87,12 @@ class GraphAtom(Atom):
         # grad_ei_2 = np.einsum("ij, j-> i", grad_sig.L, self.e)
         grad_ei = grad_ei_1 + grad_ei_2
 
-        if plot:
-            l = [tmp1, tmp2, self.e, grad_ei_1, grad_ei_2, grad_ei, tmp1 * self.e]
-            for i, ll in enumerate(l):
-                plt.figure()
-                plt.plot(ll)
-                plt.savefig(f"{save_path}x{i}.png")
+        # if plot:
+        # l = [tmp1, tmp2, self.e, grad_ei_1, grad_ei_2, grad_ei, tmp1 * self.e]
+        # for i, ll in enumerate(l):
+        #     plt.figure()
+        #     plt.plot(ll)
+        #     plt.savefig(f"{save_path}x{i}.png")
         return grad_ei
 
     def calc_grad_theta_i(self, grad_u_v):
@@ -184,11 +184,11 @@ class GraphAtom(Atom):
         grad_theta = self.calc_grad_theta_i(grad_u_v)
 
         # For constrained optimization: theta = -tau * grad_theta / ||grad_theta||
-        # if the unconstrained solution violates the constraint
+        # Gradient descent direction is -grad_theta
         grad_norm = np.linalg.norm(grad_theta)
         if grad_norm > 0:
-            # Optimal solution: theta in direction of -grad_theta
-            self.theta = -data.tau * grad_theta / grad_norm
+            # Optimal solution: theta in direction of -grad_theta, scaled to boundary
+            self.theta = -grad_theta / grad_norm * data.tau
         else:
             # If gradient is zero, keep current theta
             pass

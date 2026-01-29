@@ -45,6 +45,7 @@ class DataConfig:
         self.mu2 = config["mu2"]
         self.tau = config["tau"]
         self.gmm_center_min = config["gmm_center_min"]
+        self.gmm_min_separation = config["gmm_min_separation"]
         self.gmm_sigma = config["gmm_sigma"]
 
 

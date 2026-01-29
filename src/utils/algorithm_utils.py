@@ -9,48 +9,36 @@ from utils.graph import Graph
 from utils.utils import *
 
 
-def Piv2EC(Piv, s=None):
-    c = np.sum(Piv, axis=0)
-    E2 = Piv / (c[None, :] + 1e-10)
-    E = np.sqrt(E2)
-    # if s is not None:
-    #     E *= s
-
-    return E, c
-
-
-def map_to_simplex(atoms: Atoms, coefs: Coefs):
-    s = np.array([np.sign(atom.e) for atom in atoms]).T
-    Piv = np.array([coef * atom.e**2 for coef, atom in zip(coefs, atoms)]).T
+def map_to_simplex(atoms: Atoms):
+    Piv = np.array([atom.e**2 for atom in atoms]).T
     Piv = project_to_simplex(Piv, 1)
-    E, c = Piv2EC(Piv, s)
-    coefs.update_coefficients(c)
+    E = np.sqrt(Piv)
     for idx, atom in enumerate(atoms):
         atom.e = E[:, idx]
 
-    return atoms, coefs
+    return atoms
 
 
-def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
+def interpolate(atoms1, atoms2, alpha):
     alpha = float(alpha)
     # alpha_c = alpha / len(coefs1)
-    coefs = (1 - alpha) * coefs1 + alpha * coefs2
-    alpha_i = alpha * coefs2 / coefs
+    # coefs = (1 - alpha) * coefs1 + alpha * coefs2
+    # alpha_i = alpha * coefs2 / coefs
     # atoms = (1 - alpha_i) * atoms1 + alpha_i * atoms2
 
     atoms = Atoms()
-    alpha2 = 1 * alpha
-    for a_i, atom1, atom2 in zip(alpha_i, atoms1, atoms2):
+    # alpha2 = 1 * alpha
+    for atom1, atom2 in zip(atoms1, atoms2):
         atom = GraphAtom()
-        atom.e = np.sqrt((1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2))
-        # atom.e = np.sign(atom1.e) * np.sqrt(
-        #     (1 - a_i) * (atom1.e**2) + a_i * (atom2.e**2)
-        # )
+        atom.e = np.sqrt((1 - alpha) * (atom1.e**2) + alpha * (atom2.e**2))
+
         # Linear interpolation of theta (k-means centers)
-        atom.theta = (1 - alpha2) * atom1.theta + alpha2 * atom2.theta
+        atom.theta = (1 - alpha) * atom1.theta + alpha * atom2.theta
         # Project theta to satisfy norm constraint
         atom.theta = project_to_ball(atom.theta, data.tau)
-        atom.b = (1 - alpha2) * atom1.b + alpha2 * atom2.b
+        # atom.theta = np.sqrt((1 - a_i) * (atom1.theta**2) + a_i * (atom2.theta**2))
+
+        atom.b = (1 - alpha) * atom1.b + alpha * atom2.b
 
         atoms.add_atom(atom)
 
@@ -59,36 +47,30 @@ def interpolate(atoms1, coefs1, atoms2, coefs2, alpha):
     #     atom.R = project_to_psd_cone(atom.R, data.rho_min, data.rho_max)
     # # # atoms, coefs = map_to_simplex(atoms, coefs)
 
-    return atoms, coefs
+    return atoms
 
 
 def create_random_atoms(n, d, c, num_atoms):
     atoms = Atoms()
-    coefs = Coefs()
     for _ in range(num_atoms):
         atom = GraphAtom()
         atom.initialize(n, d, c)
         atoms.add_atom(atom)
 
-    coefs = n * np.random.rand(num_atoms)
-    coefs = project_to_simplex(coefs, n)
-    coefs = Coefs(coefs)
-    return atoms, coefs
+    return atoms
 
 
 def create_similar_atoms(graph: Graph, num_atoms):
     atoms = Atoms()
-    coefs = Coefs()
-    c = graph.num_classes
-    Rv = graph.cov
     n = graph.num_nodes
     d = graph.num_features
     for _ in range(num_atoms):
         atom = GraphAtom()
-        atom.e = np.ones(n)
+        atom.e = np.sqrt(n) * np.ones(n) / num_atoms
         # Initialize theta as a random vector with norm <= tau
-        atom.theta = np.random.randn(d)
-        atom.theta = project_to_ball(atom.theta, data.tau)
+        # atom.theta = np.random.randn(d)
+        # atom.theta = project_to_ball(atom.theta, data.tau)
+        atom.theta = np.zeros(d)
         atom.b = np.zeros((n, graph.num_clusters))
         node_ids = np.arange(n)
         atom.b[node_ids[graph.train_mask], graph.y[graph.train_mask]] = 1
@@ -98,19 +80,14 @@ def create_similar_atoms(graph: Graph, num_atoms):
 
         atoms.add_atom(atom)
 
-    coefs = np.ones(num_atoms)
-    coefs = project_to_simplex(coefs, n)
-    coefs = Coefs(coefs)
-    return atoms, coefs
+    return atoms
 
 
 def create_optimal_atoms(graph: Graph):
     atoms = Atoms()
-    coefs = Coefs()
     E = graph.E
     c = graph.num_classes
     n = graph.num_nodes
-    d = graph.num_features
 
     for i in range(c):
         atom0 = GraphAtom()
@@ -133,8 +110,7 @@ def create_optimal_atoms(graph: Graph):
 
         atom0.set_params(e, theta, b)
         atoms.add_atom(atom0)
-        coefs.add_coef(graph.λ[i])
-    return atoms, coefs
+    return atoms
 
 
 def run_spectral_clustering(graph, n_clusters):
@@ -191,17 +167,13 @@ def create_atoms_from__cluster_labels(graph: Graph, cluster_labels):
     return atoms, coefs
 
 
-def line_search(
-    atoms1, coefs1, atoms2, coefs2, f, alpha_high_limit=1, max_steps=10, tol=1e-5
-):
+def line_search(atoms1, atoms2, f, alpha_high_limit=1, max_steps=10, tol=1e-5):
     """
     Perform line search to find the optimal step size alpha that minimizes f.
 
     Args:
         atoms1: Current atoms.
-        coefs1: Current coefficients.
         atoms2: New atoms (direction).
-        coefs2: New coefficients (direction).
         f: Objective function to minimize.
         max_steps: Maximum number of steps for the line search.
         tol: Tolerance for convergence.
@@ -215,12 +187,12 @@ def line_search(
     alpha_low = 0
     alpha_high = alpha_high_limit
 
-    atoms_low, coefs_low = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_low)
-    sig_low = atoms_low.calc_sig(coefs_low)
+    atoms_low = interpolate(atoms1, atoms2, alpha_low)
+    sig_low = atoms_low.calc_sig()
     f1 = f(sig_low)
 
-    atoms_high, coefs_high = interpolate(atoms1, coefs1, atoms2, coefs2, alpha_high)
-    sig_high = atoms_high.calc_sig(coefs_high)
+    atoms_high = interpolate(atoms1, atoms2, alpha_high)
+    sig_high = atoms_high.calc_sig()
     f2 = f(sig_high)
 
     # Perform the golden-section search
@@ -230,18 +202,14 @@ def line_search(
 
         if f1 > f2:
             alpha_low = 0.5 * (alpha_high + alpha_low)
-            atoms_low, coefs_low = interpolate(
-                atoms1, coefs1, atoms2, coefs2, alpha_low
-            )
-            sig_low = atoms_low.calc_sig(coefs_low)
+            atoms_low = interpolate(atoms1, atoms2, alpha_low)
+            sig_low = atoms_low.calc_sig()
             f1 = f(sig_low)
         else:
             alpha_high = 0.5 * (alpha_high + alpha_low)
 
-            atoms_high, coefs_high = interpolate(
-                atoms1, coefs1, atoms2, coefs2, alpha_high
-            )
-            sig_high = atoms_high.calc_sig(coefs_high)
+            atoms_high = interpolate(atoms1, atoms2, alpha_high)
+            sig_high = atoms_high.calc_sig()
             f2 = f(sig_high)
 
     # Choose the best alpha
@@ -251,165 +219,9 @@ def line_search(
         alpha = alpha_high
 
     # Update atoms and coefficients using the optimal alpha
-    atoms, coefs = interpolate(atoms1, coefs1, atoms2, coefs2, alpha)
+    atoms = interpolate(atoms1, atoms2, alpha)
 
-    return atoms, coefs
-
-
-def find_diagonal_scaling(eps, c_new, max_iter=1000, tol=1e-12):
-    """
-    Solve for the diagonal entries t_v > 0 (v=1..n) that satisfy:
-        sum_{i=1..k} c_new[i] * (t_v^2 * eps[i,v]^2) / (sum_{u=1}^n t_u^2 * eps[i,u]^2) = 1  for each v=1..n.
-
-    Parameters:
-    -----------
-    eps     : (k, n) array
-              The original k unit vectors eps_i in R^n (row-wise).
-    c_new   : (k,) array
-              The new coefficients that sum to n.
-    max_iter: int
-              Maximum number of fixed-point iterations to perform.
-    tol     : float
-              Convergence tolerance on the change in t_v from one iteration to the next.
-
-    Returns:
-    --------
-    t       : (n,) array
-              The converged solution for the diagonal scaling factors.
-    """
-    n, k = eps.shape
-
-    # Initialize t_v = 1.0 as a simple starting guess
-    t = np.ones(n, dtype=np.float64)
-
-    # bar = tqdm(total=max_iter)
-    for _ in range(max_iter):
-        # Compute G_i(t) = sum_{u=1}^n t_u^2 * eps[i,u]^2 for each i
-        # shape: (k,)
-        G = np.sum(t[:, None] * eps, axis=0)
-
-        # Update each t_v via fixed-point formula
-        t_new = 1.0 / np.sum(c_new[None, :] * eps / G[None, :], axis=1)
-
-        # Check convergence
-        loss = np.max(np.abs(t_new - t))
-        # bar.set_postfix(loss=loss)
-        # bar.update(1)
-        if loss < tol:
-            t = t_new
-            return t
-
-        raise NotImplementedError
-
-    return t
-
-
-def construct_tilde_epsilon(eps, t):
-    """
-    Given eps (k x n) and the diagonal scaling vector t (n,),
-    construct tilde_eps[i] = D * eps[i] / ||D * eps[i]||, where D = diag(t).
-
-    Returns tilde_eps (k x n).
-    """
-    # (k,n) times (n,) [broadcast over columns], i.e. scale each column of eps by t
-    scaled = eps * t[:, None]  # shape (k,n)
-
-    # Norm of each row
-    norms = np.sum(scaled, axis=0, keepdims=True)  # shape (k,1)
-
-    return scaled / norms  # shape (k,n)
-
-
-def F_system(x, eps, c_new):
-    """
-    Returns the vector F(t) of dimension n, where
-       F_v(t) = sum_{i=1}^k [ c_new[i] * t_v^2 * eps[i,v]^2 / G_i(t ) ] - 1
-    and G_i(t) = sum_{u=1}^n t_u^2 * eps[i,u]^2.
-
-    Parameters
-    ----------
-    t      : (n,) array, the unknowns t_v (assumed > 0 ideally).
-    eps    : (k, n) array, original vectors eps_i in R^n (row-wise).
-    c_new  : (k,) array, new coefficients that sum to n.
-
-    Returns
-    -------
-    F_val  : (n,) array, the residuals F_v(t).
-    """
-    n, k = eps.shape
-    t = np.exp(x)
-    # G_i(t) for each i
-    # shape: (k,) => each G_i is sum_{u=1..n} t_u^2 * eps[i,u]^2
-    G = np.sum(t[:, None] * eps, axis=0)
-
-    F_val = np.zeros(n, dtype=np.float64)
-    F_val = np.sum(c_new[None, :] * eps / G[None, :], axis=1) - 1
-    return F_val
-
-
-def solve_t_v(eps, c_new, x_init=None, method="hybr", **root_kwargs):
-    """
-    Solve for x_v in R, with t_v = exp(x_v) > 0, ensuring positivity.
-
-    Uses scipy.optimize.root to solve F_system_in_log_space(x)=0.
-
-    Parameters
-    ----------
-    eps        : (k, n) array
-                 Original vectors eps_i in R^n (row i is eps_i).
-    c_new      : (k,) array
-                 New coefficients that sum to n.
-    x_init     : (n,) array or None
-                 Initial guess in log-space. If None, uses  log(1.0).
-    method     : str
-                 The method passed to `scipy.optimize.root` (e.g. 'hybr', 'lm', 'broyden1', 'krylov').
-    **root_kwargs:
-                 Additional keyword arguments for `scipy.optimize.root`.
-
-    Returns
-    -------
-    t_sol      : (n,) array
-                 The positive solution for t_v = exp(x_v).
-    success    : bool
-                 True if the solver succeeded.
-    res        : OptimizeResult
-                 Full result object from `root`.
-    """
-    k, n = eps.shape
-
-    # If no initial guess, start with all zero in log-space => t_v=exp(0)=1
-    if x_init is None:
-        x_init = np.zeros(n, dtype=np.float64)
-
-    # Solve for x via a root-finding method
-    res = root(F_system, x_init, args=(eps, c_new), method=method, **root_kwargs)
-    success = res.success
-
-    # Convert x -> t
-    t_sol = np.exp(res.x)
-
-    return t_sol, success, res
-
-
-def find_eps(E, c_new):
-    n, k = E.shape
-    eps = E**2
-    # -- Solve for t:
-    # t = find_diagonal_scaling(eps, c_new, max_iter=2000, tol=1e-14)
-    x_init = np.log(np.ones(n))  # i.e. t=1 initially
-    t, success, res = solve_t_v(eps, c_new, x_init=x_init, method="broyden1")
-    if not success:
-        raise RuntimeError(res.message)
-
-    # -- Construct tilde_eps:
-    tilde_eps = construct_tilde_epsilon(eps, t)
-
-    Piv = c_new[None, :] * tilde_eps
-
-    Piv = project_to_simplex(Piv, 1)
-    tilde_eps, tilde_c = Piv2EC(Piv)
-
-    return tilde_eps, tilde_c
+    return atoms
 
 
 def schedule_lr(
@@ -424,6 +236,8 @@ def schedule_lr(
     # method="exponential",
     # method="cosine",
 ):
+    # return 2 / (ii + 2)
+
     if method == "cosine":
         lr = min_lr + 0.5 * (max_lr - min_lr) * (
             1 + np.cos(np.pi * (ii - warmup_steps) / (max_iter - warmup_steps))

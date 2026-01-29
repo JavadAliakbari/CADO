@@ -110,8 +110,8 @@ class GraphSig(Sig):
 
     def update(self, grad, lr):
         self.L -= lr * grad.L
-        if self.Rv is not None and grad.Rv is not None:
-            self.Rv -= lr * grad.Rv
+        # if self.u_v is not None and grad.u_v is not None:
+        self.u_v -= lr * grad.u_v
         self.pi -= lr * grad.pi
 
     def project(self):

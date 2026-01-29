@@ -24,6 +24,9 @@ if __name__ == "__main__":
         probs,
         num_features,
         train_ratio=data.train_ratio,
+        gmm_center_min=config.data.gmm_center_min,
+        gmm_min_separation=config.data.gmm_min_separation,
+        gmm_sigma=config.data.gmm_sigma,
     )
     plot_adj(graph.A, name="A")
 
@@ -37,20 +40,19 @@ if __name__ == "__main__":
     plt.savefig(f"{save_path}/cluster_labels.png")
 
     if algorithm.warm_start == "random":
-        atoms, coefs = create_random_atoms(n, num_features, c, c)
+        atoms = create_random_atoms(n, num_features, c, c)
     if algorithm.warm_start == "similar":
-        atoms, coefs = create_similar_atoms(graph, c)
+        atoms = create_similar_atoms(graph, c)
     elif algorithm.warm_start == "optimal":
-        atoms, coefs = create_optimal_atoms(graph)
+        atoms = create_optimal_atoms(graph)
     elif algorithm.warm_start == "cluster":
-        atoms, coefs = create_atoms_from__cluster_labels(graph, cluster_labels)
+        atoms = create_atoms_from__cluster_labels(graph, cluster_labels)
     elif algorithm.warm_start == "load":
         path = "results/20250410_011326/"
-        atoms, coefs, graph = load_atom(path)
+        atoms, graph = load_atom(path)
 
     (
         atoms,
-        coefs,
         graph,
         results,
         f_values,
@@ -62,12 +64,10 @@ if __name__ == "__main__":
     ) = CANO(
         graph,
         atoms,
-        coefs,
-        lr_search=False,
         log_results=True,
     )
 
-    LOGGER = log_results(atoms, coefs, graph, results, save_path)
+    LOGGER = log_results(atoms, graph, results, save_path)
     LOGGER.info(f"acc: {accuracies[-1]:.4f}")
     LOGGER.info(f"ARI: {ari:.4f}")
     LOGGER.info(f"loss: {f_values[-1]:.4f}")
@@ -75,12 +75,12 @@ if __name__ == "__main__":
         f_values,
         accuracies,
         atoms,
-        coefs,
         graph,
         epsilsons,
         components,
         save_path,
         *R_params,
+        data.tau,  # Pass tau parameter
         *opt_params,
     )
-    save_model_params(atoms, coefs, graph, save_path)
+    save_model_params(atoms, graph, save_path)
