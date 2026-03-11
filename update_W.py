@@ -121,7 +121,9 @@ def compute_W_subgradient_original_fast(
     W: np.ndarray,
     A: np.ndarray,
     X: np.ndarray,
-    gamma_obj: float,
+    B: np.ndarray | None = None,
+    AX: np.ndarray | None = None,
+    gamma_obj: float = 0.0,
     eps: float = 1e-12,
 ) -> np.ndarray:
     """
@@ -130,10 +132,13 @@ def compute_W_subgradient_original_fast(
     W: (k, n), A: (k, d), X: (n, d)
     """
     k, n = W.shape
-    B = A @ A.T
+    if B is None:
+        B = A @ A.T
+    if AX is None:
+        AX = A @ X.T
 
     # Smooth part
-    G = 2.0 * (B @ W - A @ X.T)
+    G = 2.0 * (B @ W - AX)
 
     # Pair indices
     u_idx, v_idx = np.triu_indices(n, k=1)
@@ -235,6 +240,8 @@ def update_W_projected_gradient_original(
     W = np.asarray(W_init, dtype=float).copy()
     A = np.asarray(A, dtype=float)
     X = np.asarray(X, dtype=float)
+    B = A @ A.T
+    AX = A @ X.T
 
     for v in range(W.shape[1]):
         W[:, v] = project_to_simplex(W[:, v])
@@ -242,7 +249,7 @@ def update_W_projected_gradient_original(
     current_obj = objective_W_original(W, A, X, gamma_obj)
 
     for it in range(max_iter):
-        G = compute_W_subgradient_original_fast(W, A, X, gamma_obj, eps=eps)
+        G = compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
 
         step = step_size
         accepted = False
@@ -311,16 +318,9 @@ def update_W_block_coordinate_descent(
     with optional backtracking on the full objective.
     """
     rng = np.random.default_rng(seed)
-
-    W = np.asarray(W_init, dtype=float).copy()
-    A = np.asarray(A, dtype=float)
-    X = np.asarray(X, dtype=float)
-
+    W = W_init
     k, n = W.shape
     B = A @ A.T
-
-    # Vectorized initial projection
-    W = project_columns_to_simplex(W)
 
     current_obj = objective_W_original(W, A, X, gamma_obj)
 
@@ -391,6 +391,80 @@ def mirror_descent_simplex_step(
     if s <= eps:
         return np.ones_like(w_new) / len(w_new)
     return w_new / s
+
+
+def update_W_mirror_descent_full(
+    W_init: np.ndarray,
+    A: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    step_size: float = 1e-2,
+    max_iter: int = 200,
+    tol: float = 1e-6,
+    eps: float = 1e-12,
+    use_backtracking: bool = True,
+    backtracking_beta: float = 0.5,
+    min_step_size: float = 1e-14,
+    verbose: bool = False,
+):
+    """
+    Full-matrix mirror descent for W.
+
+    Each column of W stays on the simplex.
+    """
+    # W = np.asarray(W_init, dtype=float).copy()
+    W = W_init
+    B = A @ A.T
+    AX = A @ X.T
+    # k, n = W.shape
+
+    # make sure W is feasible
+    # W = np.maximum(W, eps)
+    # W /= W.sum(axis=0, keepdims=True)
+
+    # current_obj = objective_W_original(W, A, X, gamma_obj)
+
+    for it in range(max_iter):
+        G = compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
+
+        # step = step_size
+        # accepted = False
+
+        # while True:
+        Z = np.log(np.maximum(W, eps)) - step_size * G
+        Z -= np.max(Z, axis=0, keepdims=True)  # stability
+        W_candidate = np.exp(Z)
+        W_candidate /= np.sum(W_candidate, axis=0, keepdims=True)
+
+            # candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
+
+            # if (not use_backtracking) or (candidate_obj <= current_obj):
+            #     accepted = True
+            #     break
+
+            # step *= backtracking_beta
+            # if step < min_step_size:
+            #     break
+
+        # if not accepted:
+        #     if verbose:
+        #         print(f"[W-MD-full] stop at iter {it}: step too small.")
+        #     break
+
+        rel_change = np.linalg.norm(W_candidate - W) / max(np.linalg.norm(W), 1e-12)
+        W = W_candidate
+        # current_obj = candidate_obj
+
+        if verbose and (it % 25 == 0 or it == max_iter - 1):
+            print(
+                # f"[W-MD-full] iter={it:4d}, obj={current_obj:.8e}, "
+                f"step={step_size:.3e}, rel_change={rel_change:.3e}"
+            )
+
+        if rel_change < tol:
+            break
+
+    return W
 
 
 def update_W_mirror_descent(
@@ -512,7 +586,7 @@ def update_W_frank_wolfe(
     B = A @ A.T
 
     # Vectorized initial projection
-    W = project_columns_to_simplex(W)
+    # W = project_columns_to_simplex(W)
 
     # current_obj = objective_W_original(W, A, X, gamma_obj)
 
@@ -721,6 +795,21 @@ def update_W(
             eps=eps,
             randomized=randomized,
             seed=seed,
+            verbose=verbose,
+            **kwargs,
+        )
+    if method == "fmd":
+        return update_W_mirror_descent_full(
+            W_init=W_init,
+            A=A,
+            X=X,
+            gamma_obj=gamma_obj,
+            step_size=step_size,
+            max_iter=max_iter,
+            tol=tol,
+            eps=eps,
+            # randomized=randomized,
+            # seed=seed,
             verbose=verbose,
             **kwargs,
         )

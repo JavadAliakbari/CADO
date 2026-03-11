@@ -33,12 +33,14 @@ def alternating_WA_refinement(
     gamma_obj: float,
     ell: float,
     num_cycles: int = 1,
-    step_size: float = 1e-2,
+    w_step_size: float = 1e-2,
+    A_step_size: float = 1e-3,
     max_iter: int = 100,
     tol: float = 1e-7,
     eps: float = 1e-12,
-    w_method: str = "pg",
-    a_method: str = "fista",
+    w_method: str = "fmd",
+    a_method: str = "pg",
+    use_backtracking=False,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -87,10 +89,11 @@ def alternating_WA_refinement(
             X=X,
             gamma_obj=gamma_obj,
             method=w_method,
-            step_size=step_size,
+            step_size=w_step_size,
             max_iter=max_iter,
             randomized=True,
             verbose=verbose,
+            use_backtracking=use_backtracking,
             seed=0,
         )
 
@@ -101,7 +104,7 @@ def alternating_WA_refinement(
             gamma_obj=gamma_obj,
             ell=ell,
             method=a_method,
-            step_size=step_size,
+            step_size=A_step_size,
             max_iter=max_iter,
             tol=tol,
             eps=eps,
@@ -163,7 +166,8 @@ def truncation_backward_W(
     ell: float | None = None,
     trunc_refine_cycles: int = 2,
     pg_max_iter: int = 100,
-    pg_step_size: float = 1e-2,
+    w_step_size: float = 1e-2,
+    A_step_size: float = 1e-3,
     pg_tol: float = 1e-6,
     eps: float = 1e-12,
     verbose: bool = False,
@@ -206,7 +210,7 @@ def truncation_backward_W(
         Set to 0 to skip refinement.
     pg_max_iter : int
         Max projected-gradient iterations for W refinement.
-    pg_step_size : float
+    w_step_size : float
         Step size for projected-gradient W update.
     pg_tol : float
         Tolerance for projected-gradient W update.
@@ -274,7 +278,8 @@ def truncation_backward_W(
                     gamma_obj=gamma_obj,
                     ell=ell,
                     num_cycles=trunc_refine_cycles,
-                    step_size=pg_step_size,
+                    w_step_size=w_step_size,
+                    A_step_size=A_step_size,
                     max_iter=pg_max_iter,
                     tol=pg_tol,
                     eps=eps,
@@ -438,9 +443,11 @@ def cogent_structured_atoms_with_W(
     init_with_one_atom: bool = True,
     inner_alt_cycles: int = 5,
     pg_max_iter: int = 300,
-    pg_step_size: float = 1e-2,
+    w_step_size: float = 1e-2,
+    A_step_size: float = 1e-3,
     pg_tol: float = 1e-6,
     eps: float = 1e-12,
+    eta: float = 0.5,
     verbose: bool = True,
     truncation: bool = True,
     seed: int | None = None,
@@ -499,7 +506,8 @@ def cogent_structured_atoms_with_W(
                 gamma_obj=gamma_obj,
                 ell=ell,
                 num_cycles=1,
-                step_size=pg_step_size,
+                w_step_size=w_step_size,
+                A_step_size=A_step_size,
                 max_iter=pg_max_iter,
                 tol=pg_tol,
                 eps=eps,
@@ -520,12 +528,13 @@ def cogent_structured_atoms_with_W(
                 gamma_obj=gamma_obj,
                 obj_prev=obj_prev,
                 obj_post=obj_post,
-                eta=0.5,  # same role as in the paper threshold
+                eta=eta,  # same role as in the paper threshold
                 ell=ell,
                 trunc_refine_cycles=inner_alt_cycles,  # or 0 if you want faster truncation
                 pg_max_iter=pg_max_iter,
-                pg_step_size=1e-2,
-                pg_tol=1e-6,
+                w_step_size=w_step_size,
+                A_step_size=A_step_size,
+                pg_tol=pg_tol,
                 verbose=False,
             )
 
@@ -579,7 +588,7 @@ if __name__ == "__main__":
     ell = 1.0
     K_true = 3
     n_per_cluster = 100
-    sigma = 0.10
+    sigma = 0.1
     gamma_val = 0.75 / n_per_cluster
 
     radii = [1.5, 1.7, 2.0]
@@ -626,12 +635,13 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=10,
+        max_iters=15,
         init_with_one_atom=False,
-        inner_alt_cycles=2,
-        pg_max_iter=100,
-        pg_step_size=1e-2,
-        pg_tol=1e-9,
+        inner_alt_cycles=1,
+        pg_max_iter=10,
+        w_step_size=1,
+        A_step_size=1e-3,
+        pg_tol=1e-5,
         verbose=True,
         truncation=True,  # set to True to enable backward truncation
         seed=seed,

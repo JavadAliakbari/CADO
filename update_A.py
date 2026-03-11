@@ -81,9 +81,9 @@ def compute_A_subgradient_original_fast(
 
     A: (k, d), W: (k, n), X: (n, d)
     """
-    A = np.asarray(A, dtype=float)
-    W = np.asarray(W, dtype=float)
-    X = np.asarray(X, dtype=float)
+    # A = np.asarray(A, dtype=float)
+    # W = np.asarray(W, dtype=float)
+    # X = np.asarray(X, dtype=float)
 
     G = 2.0 * (W @ W.T @ A - W @ X)
 
@@ -182,44 +182,46 @@ def update_A_projected_gradient(
     """
     Projected subgradient descent for the original A objective.
     """
-    A = np.asarray(A_init, dtype=float).copy()
-    W = np.asarray(W, dtype=float)
-    X = np.asarray(X, dtype=float)
+    # A = np.asarray(A_init, dtype=float).copy()
+    # W = np.asarray(W, dtype=float)
+    # X = np.asarray(X, dtype=float)
+    A = A_init
+    step_size = 0.001
 
-    A = project_rows_to_l2_ball(A, ell, eps=eps)
-    current_obj = objective_A_original(A, W, X, gamma_obj)
+    # A = project_rows_to_l2_ball(A, ell, eps=eps)
+    # current_obj = objective_A_original(A, W, X, gamma_obj)
 
     for it in range(max_iter):
         G = compute_A_subgradient_original_fast(A, W, X, gamma_obj, eps=eps)
 
-        step = step_size
-        accepted = False
+        # step = step_size
+        # accepted = False
 
-        while True:
-            A_candidate = project_rows_to_l2_ball(A - step * G, ell, eps=eps)
-            candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
+        # while True:
+        A_candidate = project_rows_to_l2_ball(A - step_size * G, ell, eps=eps)
+        # candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
 
-            if (not use_backtracking) or (candidate_obj <= current_obj):
-                accepted = True
-                break
+        # if (not use_backtracking) or (candidate_obj <= current_obj):
+        #     accepted = True
+        #     break
 
-            step *= backtracking_beta
-            if step < min_step_size:
-                break
+        # step *= backtracking_beta
+        # if step < min_step_size:
+        #     break
 
-        if not accepted:
-            if verbose:
-                print(f"[A-PG] stop at iter {it}: step too small.")
-            break
+        # if not accepted:
+        #     if verbose:
+        #         print(f"[A-PG] stop at iter {it}: step too small.")
+        #     break
 
         rel_change = np.linalg.norm(A_candidate - A) / max(np.linalg.norm(A), 1e-12)
         A = A_candidate
-        current_obj = candidate_obj
+        # current_obj = candidate_obj
 
-        if verbose and (it % 25 == 0 or it == max_iter - 1):
-            print(
-                f"[A-PG] iter={it:4d}, obj={current_obj:.8e}, step={step:.3e}, rel_change={rel_change:.3e}"
-            )
+        # if verbose and (it % 25 == 0 or it == max_iter - 1):
+        #     print(
+        #         f"[A-PG] iter={it:4d}, obj={current_obj:.8e}, step={step_size:.3e}, rel_change={rel_change:.3e}"
+        #     )
 
         if rel_change < tol:
             break
@@ -339,34 +341,36 @@ def update_A_fista(
     Works on the original nonsmooth objective, so this is a practical
     accelerated heuristic rather than textbook smooth FISTA.
     """
-    A = project_rows_to_l2_ball(np.asarray(A_init, dtype=float).copy(), ell, eps=eps)
+    # A = project_rows_to_l2_ball(np.asarray(A_init, dtype=float).copy(), ell, eps=eps)
+    A = A_init
     Y = A.copy()
     t = 1.0
+    step_size = 0.001
 
     current_obj = objective_A_original(A, W, X, gamma_obj)
 
     for it in range(max_iter):
         G = compute_A_subgradient_original_fast(Y, W, X, gamma_obj, eps=eps)
 
-        step = step_size
-        accepted = False
+        # step = step_size
+        # accepted = False
 
-        while True:
-            A_candidate = project_rows_to_l2_ball(Y - step * G, ell, eps=eps)
-            candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
+        # while True:
+        A_candidate = project_rows_to_l2_ball(Y - step_size * G, ell, eps=eps)
+        candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
 
-            if (not use_backtracking) or (candidate_obj <= current_obj):
-                accepted = True
-                break
+        #     if (not use_backtracking) or (candidate_obj <= current_obj):
+        #         accepted = True
+        #         break
 
-            step *= backtracking_beta
-            if step < min_step_size:
-                break
+        #     step *= backtracking_beta
+        #     if step < min_step_size:
+        #         break
 
-        if not accepted:
-            if verbose:
-                print(f"[A-FISTA] stop at iter {it}: step too small.")
-            break
+        # if not accepted:
+        #     if verbose:
+        #         print(f"[A-FISTA] stop at iter {it}: step too small.")
+        #     break
 
         t_new = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * t * t))
         Y_new = A_candidate + ((t - 1.0) / t_new) * (A_candidate - A)
@@ -384,12 +388,12 @@ def update_A_fista(
         A = A_candidate
         Y = Y_new
         t = t_new
-        current_obj = candidate_obj
+        # current_obj = candidate_obj
 
-        if verbose and (it % 25 == 0 or it == max_iter - 1):
-            print(
-                f"[A-FISTA] iter={it:4d}, obj={current_obj:.8e}, step={step:.3e}, rel_change={rel_change:.3e}"
-            )
+        # if verbose and (it % 25 == 0 or it == max_iter - 1):
+        #     print(
+        #         f"[A-FISTA] iter={it:4d}, obj={current_obj:.8e}, step={step:.3e}, rel_change={rel_change:.3e}"
+        #     )
 
         if rel_change < tol:
             break
