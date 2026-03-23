@@ -223,8 +223,9 @@ def truncation_backward_W(
     threshold = float(eta * obj_prev + (1.0 - eta) * obj_post)
 
     M_cur = build_M_from_W(W_cur, A_cur, n, d)
-    obj_cur = objective_coupled(X, M_cur, gamma_obj, W_cur,
-                                A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps)
+    obj_cur = objective_coupled(
+        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+    )
 
     removed_log = []
 
@@ -273,8 +274,16 @@ def truncation_backward_W(
 
             # 3) Evaluate true objective after removal
             M_try = build_M_from_W(W_try, A_try, n, d)
-            obj_try = objective_coupled(X, M_try, gamma_obj, W_try,
-                                        A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps)
+            obj_try = objective_coupled(
+                X,
+                M_try,
+                gamma_obj,
+                W_try,
+                A_graph=A_graph,
+                mu=mu,
+                mu_graph=mu_graph,
+                eps=eps,
+            )
 
             if obj_try < best_obj:
                 best_obj = float(obj_try)
@@ -413,7 +422,7 @@ def q_rows_full(
     X: np.ndarray, M: np.ndarray, gamma: float, mu: float = 1.0, eps: float = 1e-12
 ) -> np.ndarray:
     G_son = son_subgrad_all_pairs(M, eps=eps)
-    return mu*(2.0 * (M - X) + gamma * G_son)
+    return mu * (2.0 * (M - X) + gamma * G_son)
 
 
 # ============================================================
@@ -474,10 +483,12 @@ def forward_oracle_coupled(
         H = G + np.diag(mu * (Q_M @ a))
         H = 0.5 * (H + H.T)
         eigvals, eigvecs = np.linalg.eigh(H)
-        e = eigvecs[:, 0]
+        i = np.argmax(np.abs(eigvals))
+        e = eigvecs[:, i]
+        l = np.abs(eigvals[i])
 
         # a-update: a = -ell * Q_M^T(e^2) / ||Q_M^T(e^2)||
-        e_sq = e ** 2
+        e_sq = e**2
         g = Q_M.T @ e_sq
         g_norm = float(np.linalg.norm(g))
         if g_norm > eps:
@@ -485,7 +496,7 @@ def forward_oracle_coupled(
         else:
             a = np.zeros(d, dtype=float)
 
-    return e, a
+    return np.sqrt(l) * e, a
 
 
 def augment_W_with_rho(W: np.ndarray, rho: float, n: int) -> np.ndarray:
@@ -496,7 +507,10 @@ def augment_W_with_rho(W: np.ndarray, rho: float, n: int) -> np.ndarray:
 
 
 def augment_W_with_e_star(
-    W: np.ndarray, e_star: np.ndarray, rho: float, n: int,
+    W: np.ndarray,
+    e_star: np.ndarray,
+    rho: float,
+    n: int,
 ) -> np.ndarray:
     """
     Add a new atom row to W using the e_star direction from the forward oracle.
@@ -507,12 +521,12 @@ def augment_W_with_e_star(
     This gives the new atom a non-uniform weight pattern, which is essential
     for breaking symmetry in the D-reparameterization.
     """
-    rho = float(np.clip(rho, 1e-3, 1.0))   # must be > 0 for D-reparam
-    w_new = (e_star ** 2).reshape(1, n)      # ||e||=1 => sums to 1
+    rho = float(np.clip(rho, 1e-3, 1.0))  # must be > 0 for D-reparam
+    w_new = (e_star**2).reshape(1, n)  # ||e||=1 => sums to 1
     if W.size == 0:
         return w_new
     D = np.vstack([(1.0 - rho) * W, rho * w_new])
-    D = np.array ([project_to_simplex(d) for d in D.T]).T
+    D = np.array([project_to_simplex(d) for d in D.T]).T
     return D
 
 
@@ -593,8 +607,9 @@ def cogent_structured_atoms_with_W(
 
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_prev = objective_coupled(X, M, gamma_obj, W,
-                                     A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps)
+        obj_prev = objective_coupled(
+            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+        )
 
         # ---- forward oracle ----
         if mu_graph == 0.0:
@@ -603,22 +618,31 @@ def cogent_structured_atoms_with_W(
             a_new, v_star = forward_atom_from_Q(Q, ell=ell, eps=eps)
         else:
             # Coupled: unified forward oracle with alternating (e, a)
-            D = np.sqrt(np.maximum(W, eps)) if W.shape[0] > 0 \
+            D = (
+                np.sqrt(np.maximum(W, eps))
+                if W.shape[0] > 0
                 else np.zeros((0, n), dtype=float)
+            )
             L = D.T @ D if W.shape[0] > 0 else np.zeros((n, n), dtype=float)
             Q_M = q_rows_full(X, M, gamma_obj, mu=mu, eps=eps)
             e_star, a_new = forward_oracle_coupled(
-                L=L, A_graph=A_graph, Q_M=Q_M, mu=mu, mu_graph=mu_graph,
-                ell=ell, n_alt_iters=fwd_alt_iters, eps=eps,
+                L=L,
+                A_graph=A_graph,
+                Q_M=Q_M,
+                mu=mu,
+                mu_graph=mu_graph,
+                ell=ell,
+                n_alt_iters=fwd_alt_iters,
+                eps=eps,
             )
-            v_star = int(np.argmax(e_star ** 2))
+            v_star = int(np.argmax(e_star**2))
 
         rho_opt = 0
 
         if mu_graph != 0.0 and w_method == "d":
             # D-reparameterization: use e_star^2 as the new atom's weight
             # pattern (non-uniform) with rho >= 1e-3 to break symmetry.
-            e_star = np.ones(n, dtype=float)
+            # e_star = np.ones(n, dtype=float)
             W = augment_W_with_e_star(W, e_star, rho=0.1, n=n)
         else:
             W = augment_W_with_rho(W, rho_opt, n)
@@ -649,8 +673,9 @@ def cogent_structured_atoms_with_W(
             )
 
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_post = objective_coupled(X, M, gamma_obj, W,
-                                     A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps)
+        obj_post = objective_coupled(
+            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+        )
 
         lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
 
@@ -686,8 +711,13 @@ def cogent_structured_atoms_with_W(
                 "num_atoms": int(W.shape[0]),
                 "obj_prev": float(obj_prev),
                 "obj_post": float(obj_post),
-                "q_norm_max": float(np.max(np.linalg.norm(
-                    q_rows_full(X, M, gamma_obj, mu=mu, eps=eps), axis=1))),
+                "q_norm_max": float(
+                    np.max(
+                        np.linalg.norm(
+                            q_rows_full(X, M, gamma_obj, mu=mu, eps=eps), axis=1
+                        )
+                    )
+                ),
             }
         )
 
@@ -729,9 +759,12 @@ if __name__ == "__main__":
     K_true = 3
     n_per_cluster = 50
     sigma = 0.15
+    n = K_true * n_per_cluster
     gamma_val = 0.75 / n_per_cluster
+    mu_feature = 0.0
+    mu_graph = 1.0 / n
 
-    radii = [2., 1.6, 1.8]
+    radii = [2.0, 1.6, 1.8]
     directions = random_sparse_directions(K_true, d, num_active=1, seed=seed)
 
     X, labels, centroids, _ = generate_clusters_with_directions(
@@ -747,8 +780,9 @@ if __name__ == "__main__":
 
     # ---- 2. Generate SBM graph ----
     p_intra = 0.9
-    q_inter = 0.0
+    q_inter = 0.1
     A, A_bar = generate_sbm_graph(labels, p=p_intra, q=q_inter, seed=seed)
+    n = X.shape[0]
 
     result = solve_A_hard_assignments_cvxpy(
         X=X,
@@ -761,7 +795,11 @@ if __name__ == "__main__":
 
     A_opt = result["A_opt"]
     W_true = build_W_from_labels(labels, K=K_true)
-    obj_check = objective_from_WA(X, W_true, A_opt, gamma_val)
+    # obj_check = objective_from_WA(X, W_true, A_opt, gamma_val)
+    M = build_M_from_W(W_true, A_opt, n, d)
+    obj_check = objective_coupled(
+        X, M, gamma_val, W_true, A_graph=A, mu=mu_feature, mu_graph=mu_graph
+    )
 
     print("Status:", result["status"])
     print("Cluster sizes:", result["cluster_sizes"])
@@ -778,22 +816,22 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=25,
+        max_iters=20,
         init_with_one_atom=False,
         inner_alt_cycles=1,
         pg_max_iter=500,
-        w_step_size=1e-3,
+        w_step_size=1e-2,
         A_step_size=1e-3,
         pg_tol=1e-7,
         verbose=True,
         truncation=True,  # set to True to enable backward truncation
         seed=seed,
-        A_graph = A, 
-        mu = 0.0,
-        mu_graph = 1.,
-        w_method = "d",
-        eta=1.,
-        fwd_alt_iters = 10,
+        A_graph=A,
+        mu=mu_feature,
+        mu_graph=mu_graph,
+        w_method="d",
+        eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
+        fwd_alt_iters=10,
     )
 
     print("\nFinal number of atoms:", res["A_atoms"].shape[0])
@@ -807,9 +845,9 @@ if __name__ == "__main__":
     # plt.show()
 
     # # print the final W matrix
-    print("\nFinal W matrix (shape {}):".format(res["W"].shape))
-    print(np.array2string(res["W"], precision=4, suppress_small=True))
-    
+    # print("\nFinal W matrix (shape {}):".format(res["W"].shape))
+    # print(np.array2string(res["W"], precision=4, suppress_small=True))
+
     # plot the final L vs A_graph
     D = np.sqrt(np.maximum(res["W"], 1e-12))
     L = D.T @ D
@@ -823,4 +861,4 @@ if __name__ == "__main__":
     plt.imshow(A, cmap="viridis")
     plt.colorbar()
     plt.tight_layout()
-    plt.show()     
+    plt.show()

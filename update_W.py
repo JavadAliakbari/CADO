@@ -436,15 +436,15 @@ def update_W_mirror_descent_full(
         W_candidate = np.exp(Z)
         W_candidate /= np.sum(W_candidate, axis=0, keepdims=True)
 
-            # candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
+        # candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
 
-            # if (not use_backtracking) or (candidate_obj <= current_obj):
-            #     accepted = True
-            #     break
+        # if (not use_backtracking) or (candidate_obj <= current_obj):
+        #     accepted = True
+        #     break
 
-            # step *= backtracking_beta
-            # if step < min_step_size:
-            #     break
+        # step *= backtracking_beta
+        # if step < min_step_size:
+        #     break
 
         # if not accepted:
         #     if verbose:
@@ -741,7 +741,7 @@ def update_W_frank_wolfe(
 #   Returns W = D^2.
 # ============================================================
 
-_D_FLOOR = 1e-2   # floor for the chain-rule factor in clustering gradient
+_D_FLOOR = 1e-2  # floor for the chain-rule factor in clustering gradient
 
 
 def compute_D_gradient(
@@ -756,15 +756,19 @@ def compute_D_gradient(
 ) -> np.ndarray:
     """Gradient of the coupled objective w.r.t. D.  No 1/sqrt(W) singularity."""
     # Graph term: 4 * mu_graph * D @ (D^T D - A_graph)
-    L = D.T @ D                                        # (n, n)
-    R = L - A_graph                                    # (n, n)
-    G_D = 4.0 * mu_graph * (D @ R)                    # (k, n)
+    L = D.T @ D  # (n, n)
+    R = L - A_graph  # (n, n)
+    G_D = 4.0 * mu_graph * (D @ R)  # (k, n)
 
     # Clustering term: 2 * mu * max(D, floor) * nabla_W_clust
     if mu != 0.0:
-        W = D * D                                      # recover W = D^2
+        W = D * D  # recover W = D^2
         G_W_clust = compute_W_subgradient_original_fast(
-            W, A_atoms, X, gamma_obj=gamma_obj, eps=eps,
+            W,
+            A_atoms,
+            X,
+            gamma_obj=gamma_obj,
+            eps=eps,
         )
         # D_safe = np.maximum(D, _D_FLOOR)
         # D_safe = D
@@ -806,26 +810,35 @@ def update_W_D_reparam(
 
     for it in range(max_iter):
         G_D = compute_D_gradient(
-            D, A_atoms, X, gamma_obj, A_graph, mu, mu_graph, eps=eps,
+            D,
+            A_atoms,
+            X,
+            gamma_obj,
+            A_graph,
+            mu,
+            mu_graph,
+            eps=eps,
         )
 
         # step_size = step_size / np.sqrt(it + 1)  # decaying step size
         F = D - step_size * G_D
-        D_new= F / np.linalg.norm(F, axis=0, keepdims=True)  # project to unit sphere
-        # D_new = _project_columns_to_nonneg_sphere(, eps=eps)
+        # D_new = F / np.linalg.norm(F, axis=0, keepdims=True)  # project to unit sphere
+        D_new = _project_columns_to_nonneg_sphere(F, eps=eps)
 
         rel_change = np.linalg.norm(D_new - D) / max(np.linalg.norm(D), 1e-12)
         D = D_new
 
         if verbose and (it % 25 == 0 or it == max_iter - 1):
             G_inf = float(np.max(np.abs(G_D)))
-            print(f"[W-D]  iter={it:4d}, step={step_size:.3e}, "
-                  f"|G_D|_inf={G_inf:.2f}, rel_change={rel_change:.3e}")
+            print(
+                f"[W-D]  iter={it:4d}, step={step_size:.3e}, "
+                f"|G_D|_inf={G_inf:.2f}, rel_change={rel_change:.3e}"
+            )
 
         if rel_change < tol and it > 10:
             break
 
-    return D * D   # W = D^2
+    return D * D  # W = D^2
 
 
 # ============================================================
