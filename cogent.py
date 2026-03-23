@@ -71,7 +71,7 @@ def alternating_WA_refinement(
     w_method : str
         Method for W update ("fw", "bcd", "pg", "md").
     a_method : str
-        Method for A update ("fista", "bcd", "pg", "qn").
+        Method for A update ("fista", "bcd", "pg", "pg_adam", "qn").
     verbose : bool
         Print progress.
 
