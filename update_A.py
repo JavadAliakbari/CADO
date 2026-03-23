@@ -174,6 +174,7 @@ def update_A_projected_gradient(
     max_iter: int = 300,
     tol: float = 1e-6,
     eps: float = 1e-12,
+    mu = 1.0,
     use_backtracking: bool = True,
     backtracking_beta: float = 0.5,
     min_step_size: float = 1e-14,
@@ -192,7 +193,7 @@ def update_A_projected_gradient(
     # current_obj = objective_A_original(A, W, X, gamma_obj)
 
     for it in range(max_iter):
-        G = compute_A_subgradient_original_fast(A, W, X, gamma_obj, eps=eps)
+        G = mu * compute_A_subgradient_original_fast(A, W, X, gamma_obj, eps=eps)
 
         # step = step_size
         # accepted = False
@@ -493,6 +494,7 @@ def update_A(
     tol: float = 1e-6,
     eps: float = 1e-12,
     randomized: bool = False,
+    mu: float = 1.0,
     seed: int | None = None,
     verbose: bool = False,
     **kwargs,
@@ -519,6 +521,7 @@ def update_A(
             max_iter=max_iter,
             tol=tol,
             eps=eps,
+            mu=mu,
             verbose=verbose,
             **kwargs,
         )

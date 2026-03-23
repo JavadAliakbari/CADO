@@ -77,3 +77,98 @@ def project_to_l2_ball(a: np.ndarray, ell: float, eps: float = 1e-12) -> np.ndar
     if nrm <= ell:
         return a
     return a * (ell / max(nrm, eps))
+
+
+
+
+
+# ============================================================
+# Stochastic Block Model graph generation
+# ============================================================
+
+
+def generate_sbm_graph(
+    labels: np.ndarray,
+    p: float,
+    q: float,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate a Stochastic Block Model (SBM) undirected graph.
+
+    Nodes in the same cluster are connected with probability p (intra-cluster).
+    Nodes in different clusters are connected with probability q (inter-cluster).
+
+    Parameters
+    ----------
+    labels : (n,) integer array of cluster labels (0-indexed)
+    p      : intra-cluster edge probability  (p > q for assortative structure)
+    q      : inter-cluster edge probability
+    seed   : random seed for reproducibility
+
+    Returns
+    -------
+    A     : (n, n)  binary symmetric adjacency matrix, no self-loops
+    A_bar : (n, n)  signed affinity matrix —  A_bar[i,j] = +1 if A[i,j]=1,
+                    A_bar[i,j] = -1 if A[i,j]=0 (and i != j),
+                    diagonal entries are 0.
+    """
+    rng    = np.random.default_rng(seed)
+    labels = np.asarray(labels, dtype=int)
+    n      = len(labels)
+
+    # Probability matrix: p on diagonal blocks, q elsewhere
+    same_cluster = (labels[:, np.newaxis] == labels[np.newaxis, :])  # (n, n) bool
+    prob = np.where(same_cluster, float(p), float(q))
+
+    # Sample upper-triangular edges, then symmetrise
+    U   = rng.random((n, n))
+    raw = (U < prob).astype(float)
+    A   = np.triu(raw, k=1)
+    A   = A + A.T          # symmetric
+    np.fill_diagonal(A, 1.0)   # self-loops = 1  (matches L_{vv} = 1)
+
+    # Signed affinity: 0-entries off-diagonal become -1, diagonal stays +1
+    A_bar = np.where(A > 0.5, 1.0, -1.0)
+
+    return A, A_bar
+
+
+# ============================================================
+# Low-rank matrix approximation
+# ============================================================
+
+
+def low_rank_approx(A: np.ndarray, K: int) -> np.ndarray:
+    """
+    Rank-K approximation of a symmetric matrix A via truncated eigendecomposition.
+
+        A_K = sum_{i=1}^{K}  lambda_i  u_i u_i^T
+
+    where (lambda_i, u_i) are the K largest-magnitude eigenpairs of A.
+    Negative eigenvalues are included if they are among the top-K by magnitude,
+    so the approximation captures the dominant spectral structure faithfully.
+
+    Parameters
+    ----------
+    A : (n, n)  symmetric matrix  (adjacency, covariance, etc.)
+    K : number of eigenpairs to retain
+
+    Returns
+    -------
+    A_K : (n, n)  rank-K approximation of A
+    """
+    A  = np.asarray(A, dtype=float)
+    n  = A.shape[0]
+    K  = min(int(K), n)
+
+    eigvals, eigvecs = np.linalg.eigh(A)           # ascending order, real
+
+    # Take the K eigenpairs with the largest eigenvalues (top-K, not top-K by |.|)
+    # For an adjacency / PSD-like matrix the leading positive eigenvalues carry
+    # the cluster structure; sorting descending and taking the first K is correct.
+    idx    = np.argsort(eigvals)[::-1][:K]          # indices of K largest
+    lam_K  = eigvals[idx]                           # (K,)
+    U_K    = eigvecs[:, idx]                        # (n, K)
+
+    return (U_K * lam_K) @ U_K.T                   # sum_i lam_i u_i u_i^T

@@ -723,6 +723,112 @@ def update_W_frank_wolfe(
 
 
 # ============================================================
+# 5) D-reparameterization  (for the coupled graph+feature objective)
+#
+#   D_iv = sqrt(W_iv),  constraint: ||d_v||_2 = 1, D >= 0
+#   L = D^T D  is the Laplacian used in the graph term.
+#
+#   Gradient w.r.t. D (singularity-free):
+#     graph:   4 * mu_graph * D @ (D^T D - A_graph)
+#     clust:   2 * mu * max(D, d_floor) * nabla_W_clust
+#
+#   The graph gradient is a matrix product (D @ R), so it does NOT
+#   vanish for small D entries.  The clustering gradient has an
+#   element-wise D factor (chain rule: dW/dD = 2D).  A floor on D
+#   in that factor prevents dead entries when mu_graph = 0.
+#
+#   Projection: clamp negatives to 0, normalise to unit norm.
+#   Returns W = D^2.
+# ============================================================
+
+_D_FLOOR = 1e-2   # floor for the chain-rule factor in clustering gradient
+
+
+def compute_D_gradient(
+    D: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    A_graph: np.ndarray,
+    mu: float,
+    mu_graph: float,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """Gradient of the coupled objective w.r.t. D.  No 1/sqrt(W) singularity."""
+    # Graph term: 4 * mu_graph * D @ (D^T D - A_graph)
+    L = D.T @ D                                        # (n, n)
+    R = L - A_graph                                    # (n, n)
+    G_D = 4.0 * mu_graph * (D @ R)                    # (k, n)
+
+    # Clustering term: 2 * mu * max(D, floor) * nabla_W_clust
+    if mu != 0.0:
+        W = D * D                                      # recover W = D^2
+        G_W_clust = compute_W_subgradient_original_fast(
+            W, A_atoms, X, gamma_obj=gamma_obj, eps=eps,
+        )
+        # D_safe = np.maximum(D, _D_FLOOR)
+        # D_safe = D
+        G_D += 2.0 * mu * D * G_W_clust
+
+    return G_D
+
+
+def _project_columns_to_nonneg_sphere(D: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """Project each column of D onto {d >= 0, ||d||_2 = 1}."""
+    D = np.maximum(D, 0.0)
+    norms = np.linalg.norm(D, axis=0, keepdims=True)
+    return D / np.maximum(norms, eps)
+
+
+def update_W_D_reparam(
+    W_init: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    A_graph: np.ndarray,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
+    step_size: float = 1e-3,
+    max_iter: int = 200,
+    tol: float = 1e-6,
+    eps: float = 1e-12,
+    verbose: bool = False,
+) -> np.ndarray:
+    """
+    Projected gradient descent over D on the non-negative unit sphere.
+
+    D_iv = sqrt(W_iv).  Constraint per column: ||d_v||_2 = 1, D >= 0.
+
+    Returns W = D^2  (columns on the simplex).
+    """
+    # D = np.sqrt(np.maximum(W_init, eps)).copy()
+    D = np.sqrt(W_init)
+
+    for it in range(max_iter):
+        G_D = compute_D_gradient(
+            D, A_atoms, X, gamma_obj, A_graph, mu, mu_graph, eps=eps,
+        )
+
+        # step_size = step_size / np.sqrt(it + 1)  # decaying step size
+        F = D - step_size * G_D
+        D_new= F / np.linalg.norm(F, axis=0, keepdims=True)  # project to unit sphere
+        # D_new = _project_columns_to_nonneg_sphere(, eps=eps)
+
+        rel_change = np.linalg.norm(D_new - D) / max(np.linalg.norm(D), 1e-12)
+        D = D_new
+
+        if verbose and (it % 25 == 0 or it == max_iter - 1):
+            G_inf = float(np.max(np.abs(G_D)))
+            print(f"[W-D]  iter={it:4d}, step={step_size:.3e}, "
+                  f"|G_D|_inf={G_inf:.2f}, rel_change={rel_change:.3e}")
+
+        if rel_change < tol and it > 10:
+            break
+
+    return D * D   # W = D^2
+
+
+# ============================================================
 # Unified chooser
 # ============================================================
 
@@ -740,6 +846,10 @@ def update_W(
     randomized: bool = False,
     seed: int | None = None,
     verbose: bool = False,
+    # --- new optional params for the coupled objective ---
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
     **kwargs,
 ) -> np.ndarray:
     """
@@ -748,8 +858,10 @@ def update_W(
     method options:
       - "pg"   : projected gradient / subgradient
       - "bcd"  : block coordinate descent
-      - "md"   : mirror descent
+      - "md"   : mirror descent (column-wise)
+      - "fmd"  : mirror descent (full-matrix)
       - "fw"   : Frank-Wolfe
+      - "d"    : D-reparameterization (for coupled graph+feature objective)
     """
     method = method.lower()
 
@@ -829,7 +941,25 @@ def update_W(
             **kwargs,
         )
 
-    raise ValueError(f"Unknown method '{method}'. Use one of: pg, bcd, md, fw.")
+    if method == "d":
+        if A_graph is None:
+            raise ValueError("method='d' requires A_graph to be provided.")
+        return update_W_D_reparam(
+            W_init=W_init,
+            A_atoms=A,
+            X=X,
+            gamma_obj=gamma_obj,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
+            step_size=step_size,
+            max_iter=max_iter,
+            tol=tol,
+            eps=eps,
+            verbose=verbose,
+        )
+
+    raise ValueError(f"Unknown method '{method}'. Use one of: pg, bcd, md, fmd, fw, d.")
 
 
 # ============================================================
