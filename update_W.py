@@ -1053,7 +1053,7 @@ def update_W(
     A: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    method: str = "bcd",
+    method: str = "d",
     step_size: float = 1e-2,
     max_iter: int = 50,
     tol: float = 1e-6,
@@ -1187,6 +1187,23 @@ def update_W(
             mu=mu,
             mu_graph=mu_graph,
             step_size=step_size,
+            max_iter=max_iter,
+            tol=tol,
+            eps=eps,
+            verbose=verbose,
+        )
+
+    if method == "d-fw":
+        if A_graph is None:
+            raise ValueError("method='d-fw' requires A_graph to be provided.")
+        return update_W_D_reparam_FW(
+            W_init=W_init,
+            A_atoms=A,
+            X=X,
+            gamma_obj=gamma_obj,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
             max_iter=max_iter,
             tol=tol,
             eps=eps,

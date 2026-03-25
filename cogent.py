@@ -751,7 +751,7 @@ def cogent_structured_atoms_with_W(
 
         rho_opt = 0
 
-        if mu_graph != 0.0 and (w_method == "d" or w_method == "d-spg"):
+        if mu_graph != 0.0 and (w_method == "d" or w_method == "d-spg" or w_method == "d-fw"):
             # D-reparameterization: use e_star^2 as the new atom's weight
             # pattern (non-uniform) with rho >= 1e-3 to break symmetry.
             # e_star = np.ones(n, dtype=float)
@@ -816,7 +816,7 @@ def cogent_structured_atoms_with_W(
                 A_graph_norm_sq=_A_graph_norm_sq,
             )
 
-        obj_hist.append(float(obj_post))
+        obj_hist.append(float(obj_final) if truncation else float(obj_post))
         info_hist.append(
             {
                 "iter": int(t),
@@ -825,6 +825,7 @@ def cogent_structured_atoms_with_W(
                 "num_atoms": int(W.shape[0]),
                 "obj_prev": float(obj_prev),
                 "obj_post": float(obj_post),
+                "obj_final": float(obj_final),
                 "q_norm_max": float(
                     np.max(
                         np.linalg.norm(
@@ -840,7 +841,7 @@ def cogent_structured_atoms_with_W(
                 f"iter={t:02d} "
                 f"K={W.shape[0]} "
                 # f"obj_prev={obj_prev:.4f} "
-                f"obj_post={obj_post:.4f} "
+                f"obj_final={obj_final:.4f} "
                 # f"rho={rho_opt:.4f} "
                 # f"v_star={v_star}"
             )
@@ -875,7 +876,7 @@ if __name__ == "__main__":
     sigma = 0.15
     n = K_true * n_per_cluster
     gamma_val = 0.75 / n_per_cluster
-    mu_feature = 0.0
+    mu_feature = 1.
     mu_graph = 1.0 / n
 
     radii = [2.0, 1.6, 1.8]
@@ -930,11 +931,11 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=40,
-        init_with_one_atom=False,
+        max_iters=10,
+        init_with_one_atom=True,
         inner_alt_cycles=1,
-        pg_max_iter=1000,
-        w_step_size=1e-3,
+        pg_max_iter=200,
+        w_step_size=1e-2,
         A_step_size=1e-3,
         pg_tol=1e-7,
         verbose=True,
@@ -945,7 +946,7 @@ if __name__ == "__main__":
         mu_graph=mu_graph,
         w_method="d",
         eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
-        fwd_alt_iters=1,
+        fwd_alt_iters=20,
     )
 
     print("\nFinal number of atoms:", res["A_atoms"].shape[0])
