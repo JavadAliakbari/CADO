@@ -2,6 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 try:
+    import scipy.sparse
+    import scipy.sparse.linalg
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
+
+try:
     from optimized_solution import (
         build_W_from_labels,
         objective_from_WA,
@@ -195,6 +202,7 @@ def truncation_backward_W(
     mu: float = 1.0,
     mu_graph: float = 0.0,
     w_method: str = "fmd",
+    A_graph_norm_sq: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float, list[dict]]:
     """
     Backward truncation for the W-based CoGEnT variant.
@@ -224,7 +232,8 @@ def truncation_backward_W(
 
     M_cur = build_M_from_W(W_cur, A_cur, n, d)
     obj_cur = objective_coupled(
-        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+        A_graph_norm_sq=A_graph_norm_sq,
     )
 
     removed_log = []
@@ -283,6 +292,7 @@ def truncation_backward_W(
                 mu=mu,
                 mu_graph=mu_graph,
                 eps=eps,
+                A_graph_norm_sq=A_graph_norm_sq,
             )
 
             if obj_try < best_obj:
@@ -399,6 +409,7 @@ def objective_coupled(
     mu: float = 1.0,
     mu_graph: float = 0.0,
     eps: float = 1e-12,
+    A_graph_norm_sq: float | None = None,
 ) -> float:
     """
     Coupled objective:
@@ -406,14 +417,40 @@ def objective_coupled(
 
     When mu_graph=0 this reduces to mu * objective_full.
     When mu=0 this reduces to mu_graph * ||L - A_graph||^2.
+
+    Efficient: avoids forming the n×n matrix L = D^T D.
+    Uses ||L-A||^2 = ||DD^T||^2_F - 2 * sum(DA * D) + ||A||^2_F
+    where DD^T is K×K (small).
     """
-    clust = objective_full(X, M, gamma)
+    # Skip SON computation when mu=0 (graph-only mode)
+    if mu == 0.0:
+        clust = 0.0
+    else:
+        clust = objective_full(X, M, gamma)
 
     graph_term = 0.0
-    if mu_graph != 0.0 and A_graph is not None:
-        D = np.sqrt(np.maximum(W, eps))
-        L = D.T @ D
-        graph_term = float(np.sum((L - A_graph) ** 2))
+    if mu_graph != 0.0 and A_graph is not None and W.shape[0] > 0:
+        D = np.sqrt(np.maximum(W, eps))           # (K, n)
+        DDT = D @ D.T                              # (K, K) — cheap
+        # ||L||^2_F = ||DD^T||^2_F = tr((DD^T)^2)
+        L_norm_sq = float(np.sum(DDT ** 2))
+
+        # tr(L A) = sum_{i,v} (DA)_{iv} * D_{iv}
+        if scipy.sparse.issparse(A_graph):
+            DA = D @ A_graph                       # (K, n) sparse matmul
+        else:
+            DA = D @ A_graph                       # (K, n)
+        trLA = float(np.sum(DA * D))
+
+        # ||A||^2_F — precomputed if provided
+        if A_graph_norm_sq is not None:
+            A_norm_sq = A_graph_norm_sq
+        elif scipy.sparse.issparse(A_graph):
+            A_norm_sq = float(A_graph.multiply(A_graph).sum())
+        else:
+            A_norm_sq = float(np.sum(A_graph ** 2))
+
+        graph_term = L_norm_sq - 2.0 * trLA + A_norm_sq
 
     return mu_graph * graph_term + mu * clust
 
@@ -421,6 +458,9 @@ def objective_coupled(
 def q_rows_full(
     X: np.ndarray, M: np.ndarray, gamma: float, mu: float = 1.0, eps: float = 1e-12
 ) -> np.ndarray:
+    # Short-circuit when mu=0 (graph-only mode): skip O(n²d) SON subgradient
+    if mu == 0.0:
+        return np.zeros_like(M)
     G_son = son_subgrad_all_pairs(M, eps=eps)
     return mu * (2.0 * (M - X) + gamma * G_son)
 
@@ -447,8 +487,8 @@ def forward_atom_from_Q(Q: np.ndarray, ell: float, eps: float = 1e-12):
 
 
 def forward_oracle_coupled(
-    L: np.ndarray,
-    A_graph: np.ndarray,
+    D: np.ndarray,
+    A_graph,
     Q_M: np.ndarray,
     mu: float,
     mu_graph: float = 0.0,
@@ -461,31 +501,97 @@ def forward_oracle_coupled(
 
     Solves:  min_{||e||=1, ||a||<=ell}  e^T G e  +  mu * a^T Q_M^T (e o e)
 
-    where G = 2 * mu_graph * (L - A_graph).
+    where G = 2 * mu_graph * (L - A_graph), L = D^T D.
 
-    e-update: smallest eigenvector of  G + Diag(mu * Q_M @ a)
+    e-update: eigenvector with largest |eigenvalue| of  G + Diag(mu * Q_M @ a)
     a-update: a = -ell * Q_M^T(e^2) / ||Q_M^T(e^2)||
 
     When mu_graph=0, G=0 and the oracle is driven by clustering only.
-    When mu=0, the a-update is irrelevant and e = smallest eigvec of G.
+    When mu=0, the a-update is irrelevant and e = extremal eigvec of G.
+
+    Uses an iterative eigensolver (scipy.sparse.linalg.eigsh) with implicit
+    matvec to avoid forming the n×n matrix G:
+        Gx = 2*mu_graph*(D^T(Dx) - A_graph @ x)
+
+    Parameters
+    ----------
+    D : (K, n) array — sqrt of W
+    A_graph : (n, n) array or sparse matrix — target adjacency/affinity
+    Q_M : (n, d) array — clustering gradient rows
+    mu, mu_graph : floats — weights
+    ell : float — l2 ball radius
+    n_alt_iters : int — alternating iterations
+    eps : float — numerical tolerance
 
     Returns (e_star, a_star).
     """
-    n = L.shape[0]
+    n = D.shape[1] if D.shape[0] > 0 else Q_M.shape[0]
     d = Q_M.shape[1]
-    G = 2.0 * mu_graph * (L - A_graph)
 
     a = np.zeros(d, dtype=float)
     e = np.zeros(n, dtype=float)
 
+    A_is_sparse = scipy.sparse.issparse(A_graph)
+
     for _ in range(n_alt_iters):
-        # e-update: smallest eigenvector of G + Diag(mu * Q_M @ a)
-        H = G + np.diag(mu * (Q_M @ a))
-        H = 0.5 * (H + H.T)
-        eigvals, eigvecs = np.linalg.eigh(H)
-        i = np.argmax(np.abs(eigvals))
-        e = eigvecs[:, i]
-        l = np.abs(eigvals[i])
+        # e-update: find eigenvector with largest |eigenvalue| of H
+        # H = 2*mu_graph*(L - A_graph) + Diag(mu * Q_M @ a)
+        # Implicit matvec: Hx = 2*mu_graph*(D^T(Dx) - A_graph @ x) + diag_vec * x
+        diag_vec = mu * (Q_M @ a)  # (n,)
+
+        def _matvec(x, D=D, A_graph=A_graph, mu_graph=mu_graph,
+                    diag_vec=diag_vec, A_is_sparse=A_is_sparse):
+            x = np.asarray(x, dtype=float).ravel()
+            # Graph part: 2*mu_graph * (D^T(Dx) - Ax)
+            if mu_graph != 0.0 and D.shape[0] > 0:
+                Dx = D @ x                         # (K,)
+                DTDx = D.T @ Dx                     # (n,)
+                if A_is_sparse:
+                    Ax = A_graph @ x                # (n,)
+                else:
+                    Ax = A_graph @ x                # (n,)
+                graph_part = 2.0 * mu_graph * (DTDx - Ax)
+            else:
+                graph_part = np.zeros(len(x), dtype=float)
+            return graph_part + diag_vec * x
+
+        H_op = scipy.sparse.linalg.LinearOperator(
+            shape=(n, n), matvec=_matvec, dtype=float
+        )
+
+        # Find extremal eigenvalues (largest and smallest) to pick the one
+        # with largest absolute value
+        try:
+            # Get largest eigenvalue
+            eigvals_lg, eigvecs_lg = scipy.sparse.linalg.eigsh(
+                H_op, k=1, which='LA', tol=1e-6, maxiter=300
+            )
+            # Get smallest eigenvalue
+            eigvals_sm, eigvecs_sm = scipy.sparse.linalg.eigsh(
+                H_op, k=1, which='SA', tol=1e-6, maxiter=300
+            )
+
+            if abs(eigvals_lg[0]) >= abs(eigvals_sm[0]):
+                l = abs(eigvals_lg[0])
+                e = eigvecs_lg[:, 0]
+            else:
+                l = abs(eigvals_sm[0])
+                e = eigvecs_sm[:, 0]
+        except Exception:
+            # Fallback: if iterative solver fails, build H explicitly
+            if D.shape[0] > 0:
+                L = D.T @ D
+                G = 2.0 * mu_graph * (L - A_graph)
+                if A_is_sparse:
+                    G = np.asarray(G)
+            else:
+                G = np.zeros((n, n), dtype=float)
+            H = G + np.diag(diag_vec)
+            H = 0.5 * (H + H.T)
+            eigvals_all, eigvecs_all = np.linalg.eigh(H)
+            i = np.argmax(np.abs(eigvals_all))
+            e = eigvecs_all[:, i]
+            l = abs(eigvals_all[i])
 
         # a-update: a = -ell * Q_M^T(e^2) / ||Q_M^T(e^2)||
         e_sq = e**2
@@ -594,6 +700,12 @@ def cogent_structured_atoms_with_W(
     if A_graph is None:
         A_graph = np.zeros((n, n), dtype=float)
 
+    # Precompute ||A_graph||^2_F once (used in efficient objective)
+    if scipy.sparse.issparse(A_graph):
+        _A_graph_norm_sq = float(A_graph.multiply(A_graph).sum())
+    else:
+        _A_graph_norm_sq = float(np.sum(A_graph ** 2))
+
     W = np.zeros((0, n), dtype=float)
     A_atoms = np.zeros((0, d), dtype=float)
 
@@ -608,7 +720,8 @@ def cogent_structured_atoms_with_W(
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
         obj_prev = objective_coupled(
-            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+            A_graph_norm_sq=_A_graph_norm_sq,
         )
 
         # ---- forward oracle ----
@@ -623,10 +736,9 @@ def cogent_structured_atoms_with_W(
                 if W.shape[0] > 0
                 else np.zeros((0, n), dtype=float)
             )
-            L = D.T @ D if W.shape[0] > 0 else np.zeros((n, n), dtype=float)
             Q_M = q_rows_full(X, M, gamma_obj, mu=mu, eps=eps)
             e_star, a_new = forward_oracle_coupled(
-                L=L,
+                D=D,
                 A_graph=A_graph,
                 Q_M=Q_M,
                 mu=mu,
@@ -674,7 +786,8 @@ def cogent_structured_atoms_with_W(
 
         M = build_M_from_W(W, A_atoms, n, d)
         obj_post = objective_coupled(
-            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps
+            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+            A_graph_norm_sq=_A_graph_norm_sq,
         )
 
         lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
@@ -700,6 +813,7 @@ def cogent_structured_atoms_with_W(
                 mu=mu,
                 mu_graph=mu_graph,
                 w_method=w_method,
+                A_graph_norm_sq=_A_graph_norm_sq,
             )
 
         obj_hist.append(float(obj_post))
@@ -757,7 +871,7 @@ if __name__ == "__main__":
     d = 2
     ell = 1.0
     K_true = 3
-    n_per_cluster = 100
+    n_per_cluster = 80
     sigma = 0.15
     n = K_true * n_per_cluster
     gamma_val = 0.75 / n_per_cluster
@@ -819,7 +933,7 @@ if __name__ == "__main__":
         max_iters=40,
         init_with_one_atom=False,
         inner_alt_cycles=1,
-        pg_max_iter=2000,
+        pg_max_iter=1000,
         w_step_size=1e-3,
         A_step_size=1e-3,
         pg_tol=1e-7,
@@ -830,8 +944,8 @@ if __name__ == "__main__":
         mu=mu_feature,
         mu_graph=mu_graph,
         w_method="d",
-        eta=0.2,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
-        fwd_alt_iters=10,
+        eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
+        fwd_alt_iters=1,
     )
 
     print("\nFinal number of atoms:", res["A_atoms"].shape[0])
