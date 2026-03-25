@@ -1,5 +1,6 @@
 import numpy as np
-
+import copy as cp
+from utils import _fw_lmo_columns_nonneg_unit_ball
 
 # ============================================================
 # Simplex projection
@@ -756,9 +757,16 @@ def compute_D_gradient(
 ) -> np.ndarray:
     """Gradient of the coupled objective w.r.t. D.  No 1/sqrt(W) singularity."""
     # Graph term: 4 * mu_graph * D @ (D^T D - A_graph)
-    L = D.T @ D  # (n, n)
-    R = L - A_graph  # (n, n)
-    G_D = 4.0 * mu_graph * (D @ R)  # (k, n)
+    # L = D.T @ D  # (n, n)
+    # R = L - A_graph  # (n, n)
+    # G_D = 4.0 * mu_graph * (D @ R)  # (k, n)
+
+    DDT = D @ D.T
+    DA = D @ A_graph
+    G_D = 4.0 * mu_graph * (DDT @ D - DA)
+
+    ## check if the two grads are the same
+    # print("G_D vs G_D_new diff:", np.linalg.norm(G_D - G_D_new))
 
     # Clustering term: 2 * mu * max(D, floor) * nabla_W_clust
     if mu != 0.0:
@@ -782,6 +790,12 @@ def _project_columns_to_nonneg_sphere(D: np.ndarray, eps: float = 1e-12) -> np.n
     D = np.maximum(D, 0.0)
     norms = np.linalg.norm(D, axis=0, keepdims=True)
     return D / np.maximum(norms, eps)
+
+
+
+
+
+
 
 
 def update_W_D_reparam(
@@ -835,11 +849,199 @@ def update_W_D_reparam(
                 f"|G_D|_inf={G_inf:.2f}, rel_change={rel_change:.3e}"
             )
 
-        if rel_change < tol and it > 10:
+        if rel_change < tol:
             break
 
     return D * D  # W = D^2
 
+
+
+def update_W_D_reparam_SPG(
+    W_init: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    A_graph: np.ndarray,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
+    step_size: float = 1e-3,
+    max_iter: int = 200,
+    tol: float = 1e-6,
+    eps: float = 1e-12,
+    verbose: bool = False,
+    step_min: float = 1e-10,
+    step_max: float = 1e3,
+) -> np.ndarray:
+    """
+    SPG-style projected gradient method over D on the non-negative unit sphere.
+
+    D_iv = sqrt(W_iv). Constraint per column: ||d_v||_2 = 1, D >= 0.
+
+    Returns W = D^2  (columns on the simplex).
+
+    Notes
+    -----
+    - This version assumes compute_D_gradient(...) returns the true gradient.
+    - It uses Barzilai-Borwein spectral step sizes.
+    - It does not use an explicit line search, so it is a lightweight SPG variant.
+    """
+
+    D = np.sqrt(W_init)
+    G_D = compute_D_gradient(
+        D,
+        A_atoms,
+        X,
+        gamma_obj,
+        A_graph,
+        mu,
+        mu_graph,
+        eps=eps,
+    )
+
+    alpha = step_size
+
+    for it in range(max_iter):
+        # Projected spectral step
+        F = D - alpha * G_D
+        D_new = _project_columns_to_nonneg_sphere(F, eps=eps)
+
+        rel_change = np.linalg.norm(D_new - D) / max(np.linalg.norm(D), 1e-12)
+
+        # New gradient
+        G_D_new = compute_D_gradient(
+            D_new,
+            A_atoms,
+            X,
+            gamma_obj,
+            A_graph,
+            mu,
+            mu_graph,
+            eps=eps,
+        )
+
+        # BB spectral step update
+        S = D_new - D
+        Y = G_D_new - G_D
+
+        sy = np.sum(S * Y)
+        ss = np.sum(S * S)
+
+        if sy > eps and ss > eps:
+            alpha = ss / sy
+            alpha = float(np.clip(alpha, step_min, step_max))
+        else:
+            alpha = step_size
+
+        D = cp.deepcopy(D_new)  
+        G_D = cp.deepcopy(G_D_new)
+
+        if verbose and (it % 25 == 0 or it == max_iter - 1):
+            G_inf = float(np.max(np.abs(G_D)))
+            print(
+                f"[W-D-SPG] iter={it:4d}, alpha={alpha:.3e}, "
+                f"|G_D|_inf={G_inf:.2f}, rel_change={rel_change:.3e}"
+            )
+
+        if rel_change < tol:
+            break
+
+    return D * D
+
+
+
+
+def update_W_D_reparam_FW(
+    W_init: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    A_graph: np.ndarray,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
+    max_iter: int = 200,
+    tol: float = 1e-6,
+    eps: float = 1e-12,
+    verbose: bool = False,
+    step_rule: str = "open_loop",
+    step_size: float = 1.0,
+) -> np.ndarray:
+    """
+    Frank-Wolfe over D with column-wise feasible set
+
+        d_v >= 0, ||d_v||_2 <= 1.
+
+    D_iv = sqrt(W_iv).
+
+    Returns
+    -------
+    W = D^2
+
+    Notes
+    -----
+    1. Frank-Wolfe requires a convex feasible set, so this solves the relaxed
+       problem with ||d_v||_2 <= 1 rather than ||d_v||_2 = 1.
+
+    2. step_rule:
+       - "open_loop": eta_t = 2 / (t + 2)
+       - "fixed":     eta_t = step_size
+    """
+    D = np.sqrt(np.maximum(W_init, 0.0)).copy()
+
+    # Optional: if you want the initial point projected to the ball, do this
+    col_norms = np.linalg.norm(D, axis=0, keepdims=True)
+    D = D / np.maximum(1.0, col_norms)
+
+    for it in range(max_iter):
+        G_D = compute_D_gradient(
+            D,
+            A_atoms,
+            X,
+            gamma_obj,
+            A_graph,
+            mu,
+            mu_graph,
+            eps=eps,
+        )
+
+        # LMO: minimize <G_D, S> over feasible set
+        S = _fw_lmo_columns_nonneg_unit_ball(G_D, eps=eps)
+
+        # FW direction
+        Delta = S - D
+
+        # Relative change proxy
+        delta_norm = np.linalg.norm(Delta)
+        rel_change = delta_norm / max(np.linalg.norm(D), 1e-12)
+
+        if verbose and (it % 25 == 0 or it == max_iter - 1):
+            G_inf = float(np.max(np.abs(G_D)))
+            dual_gap = float(-np.sum(G_D * Delta))  # standard FW gap
+            print(
+                f"[W-D-FW] iter={it:4d}, "
+                f"|G_D|_inf={G_inf:.2f}, "
+                f"gap={dual_gap:.3e}, "
+                f"rel_change={rel_change:.3e}"
+            )
+
+        # Stopping criterion
+        dual_gap = float(-np.sum(G_D * Delta))
+        if dual_gap < tol and it > 10:
+            break
+
+        # Step size
+        if step_rule == "open_loop":
+            eta = 2.0 / (it + 2.0)
+        elif step_rule == "fixed":
+            eta = float(step_size)
+        else:
+            raise ValueError("step_rule must be 'open_loop' or 'fixed'")
+
+        eta = min(max(eta, 0.0), 1.0)
+
+        # FW update
+        D = (1.0 - eta) * D + eta * S
+
+    return D * D
 
 # ============================================================
 # Unified chooser
@@ -875,6 +1077,7 @@ def update_W(
       - "fmd"  : mirror descent (full-matrix)
       - "fw"   : Frank-Wolfe
       - "d"    : D-reparameterization (for coupled graph+feature objective)
+      - "d-spg": D-reparameterization with spectral projected gradient
     """
     method = method.lower()
 
@@ -972,7 +1175,25 @@ def update_W(
             verbose=verbose,
         )
 
-    raise ValueError(f"Unknown method '{method}'. Use one of: pg, bcd, md, fmd, fw, d.")
+    if method == "d-spg":
+        if A_graph is None:
+            raise ValueError("method='d-spg' requires A_graph to be provided.")
+        return update_W_D_reparam_SPG(
+            W_init=W_init,
+            A_atoms=A,
+            X=X,
+            gamma_obj=gamma_obj,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
+            step_size=step_size,
+            max_iter=max_iter,
+            tol=tol,
+            eps=eps,
+            verbose=verbose,
+        )
+
+    raise ValueError(f"Unknown method '{method}'. Use one of: pg, bcd, md, fmd, fw, d, d-spg.")
 
 
 # ============================================================

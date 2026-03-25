@@ -639,7 +639,7 @@ def cogent_structured_atoms_with_W(
 
         rho_opt = 0
 
-        if mu_graph != 0.0 and w_method == "d":
+        if mu_graph != 0.0 and (w_method == "d" or w_method == "d-spg"):
             # D-reparameterization: use e_star^2 as the new atom's weight
             # pattern (non-uniform) with rho >= 1e-3 to break symmetry.
             # e_star = np.ones(n, dtype=float)
@@ -757,7 +757,7 @@ if __name__ == "__main__":
     d = 2
     ell = 1.0
     K_true = 3
-    n_per_cluster = 50
+    n_per_cluster = 100
     sigma = 0.15
     n = K_true * n_per_cluster
     gamma_val = 0.75 / n_per_cluster
@@ -779,8 +779,8 @@ if __name__ == "__main__":
     )
 
     # ---- 2. Generate SBM graph ----
-    p_intra = 0.9
-    q_inter = 0.1
+    p_intra = 0.6
+    q_inter = 0.15
     A, A_bar = generate_sbm_graph(labels, p=p_intra, q=q_inter, seed=seed)
     n = X.shape[0]
 
@@ -816,11 +816,11 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=20,
+        max_iters=40,
         init_with_one_atom=False,
         inner_alt_cycles=1,
-        pg_max_iter=500,
-        w_step_size=1e-2,
+        pg_max_iter=2000,
+        w_step_size=1e-3,
         A_step_size=1e-3,
         pg_tol=1e-7,
         verbose=True,
@@ -830,7 +830,7 @@ if __name__ == "__main__":
         mu=mu_feature,
         mu_graph=mu_graph,
         w_method="d",
-        eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
+        eta=0.2,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
         fwd_alt_iters=10,
     )
 

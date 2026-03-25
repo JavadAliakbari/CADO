@@ -172,3 +172,28 @@ def low_rank_approx(A: np.ndarray, K: int) -> np.ndarray:
     U_K    = eigvecs[:, idx]                        # (n, K)
 
     return (U_K * lam_K) @ U_K.T                   # sum_i lam_i u_i u_i^T
+
+
+def _fw_lmo_columns_nonneg_unit_ball(G: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """
+    Linear minimization oracle for each column over
+
+        {d >= 0, ||d||_2 <= 1}.
+
+    For each column g, solves
+
+        s = argmin_{d >= 0, ||d||_2 <= 1} <g, d>.
+
+    Solution:
+        if some entries of g are negative:
+            s = -(-g)_+ / ||(-g)_+||_2
+        else:
+            s = 0
+    """
+    H = np.maximum(-G, 0.0)  # positive where G is negative
+    norms = np.linalg.norm(H, axis=0, keepdims=True)
+
+    S = np.zeros_like(G)
+    mask = norms > eps
+    S[:, mask[0]] = H[:, mask[0]] / norms[:, mask[0]]
+    return S
