@@ -181,6 +181,149 @@ def remove_atom_and_reproject_W(W: np.ndarray, j: int) -> np.ndarray:
     return W_new
 
 
+def merge_correlated_atoms(
+    W: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    ell: float,
+    corr_thresh: float = 0.95,
+    corr_thresh_a: float | None = None,
+    refine_cycles: int = 2,
+    pg_max_iter: int = 300,
+    w_step_size: float = 1e-2,
+    A_step_size: float = 1e-3,
+    pg_tol: float = 1e-6,
+    eps: float = 1e-12,
+    verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
+    w_method: str = "fmd",
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """
+    Heuristic: merge atoms that are too similar, based on either:
+      1. Weight-pattern similarity: cosine(D[i,:], D[j,:]) > corr_thresh
+      2. Atom similarity: cosine(a_i, a_j) > corr_thresh_a
+
+    If corr_thresh_a is None, it defaults to corr_thresh.
+
+    At each step the pair with the highest similarity (across both criteria)
+    is merged first. The merge keeps going until no pair exceeds either
+    threshold.
+
+    Merging rule for atoms i, j:
+        w_merged = w_i + w_j  (sum of weights, then reproject to simplex)
+        a_merged = (lam_i * a_i + lam_j * a_j) / (lam_i + lam_j)
+                   projected back onto the l2 ball of radius ell.
+
+    After each merge, alternating_WA_refinement is called to re-optimize.
+
+    Returns (W, A_atoms, n_merged).
+    """
+    if corr_thresh_a is None:
+        corr_thresh_a = corr_thresh
+
+    n_merged = 0
+
+    while W.shape[0] > 1:
+        K = W.shape[0]
+
+        # --- Weight-pattern (D-row) cosine similarity ---
+        D = np.sqrt(np.maximum(W, eps))  # (K, n)
+        d_norms = np.linalg.norm(D, axis=1, keepdims=True)
+        d_norms = np.maximum(d_norms, eps)
+        C_w = (D / d_norms) @ (D / d_norms).T  # (K, K)
+        np.fill_diagonal(C_w, 0.0)
+        C_w = np.triu(C_w)
+
+        # --- Atom (A-row) cosine similarity ---
+        a_norms = np.linalg.norm(A_atoms, axis=1, keepdims=True)  # (K, 1)
+        a_norms = np.maximum(a_norms, eps)
+        C_a = (A_atoms / a_norms) @ (A_atoms / a_norms).T  # (K, K)
+        np.fill_diagonal(C_a, 0.0)
+        C_a = np.triu(C_a)
+
+        # Find the best candidate from each criterion
+        max_w = float(np.max(C_w))
+        max_a = float(np.max(C_a))
+
+        # Check which (if any) exceeds its threshold; pick the higher one
+        w_exceeds = max_w >= corr_thresh
+        a_exceeds = max_a >= corr_thresh_a
+        if not w_exceeds and not a_exceeds:
+            break  # Nothing to merge
+
+        if w_exceeds and a_exceeds:
+            # Both exceed — pick whichever pair has higher similarity
+            if max_w >= max_a:
+                i, j = np.unravel_index(np.argmax(C_w), C_w.shape)
+                reason = f"D-cosine={max_w:.4f}"
+            else:
+                i, j = np.unravel_index(np.argmax(C_a), C_a.shape)
+                reason = f"A-cosine={max_a:.4f}"
+        elif w_exceeds:
+            i, j = np.unravel_index(np.argmax(C_w), C_w.shape)
+            reason = f"D-cosine={max_w:.4f}"
+        else:
+            i, j = np.unravel_index(np.argmax(C_a), C_a.shape)
+            reason = f"A-cosine={max_a:.4f}"
+
+        # Merge atoms i and j
+        lam_i = float(np.sum(W[i]))
+        lam_j = float(np.sum(W[j]))
+        w_merged = W[i] + W[j]
+
+        # Atom merge: weighted average, project to l2 ball
+        if lam_i + lam_j > eps:
+            a_merged = (lam_i * A_atoms[i] + lam_j * A_atoms[j]) / (lam_i + lam_j)
+        else:
+            a_merged = 0.5 * (A_atoms[i] + A_atoms[j])
+        a_norm = float(np.linalg.norm(a_merged))
+        if a_norm > ell:
+            a_merged = ell * a_merged / a_norm
+
+        if verbose:
+            print(
+                f"[MERGE] atoms {i},{j}  {reason}  "
+                f"lam=({lam_i:.3f},{lam_j:.3f})  K={K}->{K-1}"
+            )
+
+        # Replace atom i with merged, remove atom j
+        W[i] = w_merged
+        A_atoms[i] = a_merged
+        W = np.delete(W, j, axis=0)
+        A_atoms = np.delete(A_atoms, j, axis=0)
+
+        # Reproject W columns to simplex
+        W = project_columns_to_simplex(W)
+
+        # Re-optimize
+        if refine_cycles > 0:
+            W, A_atoms = alternating_WA_refinement(
+                W=W,
+                A=A_atoms,
+                X=X,
+                gamma_obj=gamma_obj,
+                ell=ell,
+                num_cycles=refine_cycles,
+                w_step_size=w_step_size,
+                A_step_size=A_step_size,
+                max_iter=pg_max_iter,
+                tol=pg_tol,
+                eps=eps,
+                verbose=False,
+                A_graph=A_graph,
+                mu=mu,
+                mu_graph=mu_graph,
+                w_method=w_method,
+            )
+
+        n_merged += 1
+
+    return W, A_atoms, n_merged
+
+
 def truncation_backward_W(
     X: np.ndarray,
     W: np.ndarray,
@@ -335,6 +478,162 @@ def truncation_backward_W(
     return W_cur, A_cur, float(obj_cur), removed_log
 
 
+def truncation_global_W(
+    X: np.ndarray,
+    W: np.ndarray,
+    A_atoms: np.ndarray,
+    gamma_obj: float,
+    obj_best_hist: list[float],
+    drop_frac: float = 0.01,
+    lookback: int = 3,
+    ell: float | None = None,
+    trunc_refine_cycles: int = 2,
+    pg_max_iter: int = 100,
+    w_step_size: float = 1e-2,
+    A_step_size: float = 1e-3,
+    pg_tol: float = 1e-6,
+    eps: float = 1e-12,
+    verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
+    w_method: str = "fmd",
+    A_graph_norm_sq: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, float, list[dict]]:
+    """
+    Global-threshold truncation for the W-based CoGEnT variant.
+
+    Instead of using the per-iteration eta threshold, this computes each
+    atom's individual contribution to the objective:
+
+        contribution_j = obj_without_j - obj_current
+
+    An atom is removable if its contribution is small relative to the
+    total objective improvement since `lookback` iterations ago:
+
+        contribution_j < drop_frac * (obj_lookback - obj_current)
+
+    i.e. removing atom j costs less than drop_frac of the total progress.
+    If obj_lookback is not available (early iterations), falls back to
+    fraction of the current objective:
+
+        contribution_j < drop_frac * obj_current / K
+
+    Parameters
+    ----------
+    obj_best_hist : list of floats
+        History of best objectives from previous iterations.
+    drop_frac : float
+        Fraction of total improvement (or per-atom objective) below which
+        an atom is considered dispensable.  Default 0.01 (1%).
+    lookback : int
+        How many iterations back to measure total improvement. Default 3.
+    """
+    W_cur = W
+    A_cur = A_atoms
+    n, d = X.shape
+
+    M_cur = build_M_from_W(W_cur, A_cur, n, d)
+    obj_cur = objective_coupled(
+        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph,
+        eps=eps, A_graph_norm_sq=A_graph_norm_sq,
+    )
+
+    # Compute the global improvement budget
+    if len(obj_best_hist) >= lookback:
+        obj_ref = obj_best_hist[-lookback]
+    elif len(obj_best_hist) > 0:
+        obj_ref = obj_best_hist[0]
+    else:
+        obj_ref = obj_cur
+
+    total_improvement = max(obj_ref - obj_cur, 0.0)
+
+    removed_log = []
+
+    if verbose:
+        print(
+            f"[TRUNC-GLOBAL] obj_cur={obj_cur:.6f}  "
+            f"obj_ref={obj_ref:.6f}  improvement={total_improvement:.6f}  "
+            f"drop_frac={drop_frac}"
+        )
+
+    while W_cur.shape[0] > 1:
+        k = W_cur.shape[0]
+
+        # Compute contribution of each atom
+        contributions = []
+        candidates = []
+        for j in reversed(range(k)):
+            W_try = remove_atom_and_reproject_W(W_cur, j)
+            A_try = np.delete(A_cur, j, axis=0)
+
+            if trunc_refine_cycles > 0:
+                if ell is None:
+                    raise ValueError(
+                        "ell must be provided when trunc_refine_cycles > 0."
+                    )
+                W_try, A_try = alternating_WA_refinement(
+                    W=W_try, A=A_try, X=X,
+                    gamma_obj=gamma_obj, ell=ell,
+                    num_cycles=trunc_refine_cycles,
+                    w_step_size=w_step_size, A_step_size=A_step_size,
+                    max_iter=pg_max_iter, tol=pg_tol, eps=eps,
+                    verbose=False, A_graph=A_graph,
+                    mu=mu, mu_graph=mu_graph, w_method=w_method,
+                )
+
+            M_try = build_M_from_W(W_try, A_try, n, d)
+            obj_try = objective_coupled(
+                X, M_try, gamma_obj, W_try, A_graph=A_graph,
+                mu=mu, mu_graph=mu_graph, eps=eps,
+                A_graph_norm_sq=A_graph_norm_sq,
+            )
+
+            contrib = float(obj_try - obj_cur)  # cost of removing atom j (>= 0)
+            contributions.append(contrib)
+            candidates.append((j, contrib, W_try, A_try, float(obj_try)))
+
+        # Determine threshold: atom is dispensable if removing it costs less than
+        # drop_frac of the total improvement budget
+        if total_improvement > eps:
+            thresh = drop_frac * total_improvement
+        else:
+            # Fallback: fraction of current objective per atom
+            thresh = drop_frac * obj_cur / max(k, 1)
+
+        # Find the cheapest-to-remove atom
+        candidates.sort(key=lambda c: c[1])  # sort by contribution ascending
+        best_j, best_contrib, best_W, best_A, best_obj = candidates[0]
+
+        if best_contrib <= thresh:
+            if verbose:
+                print(
+                    f"[TRUNC-GLOBAL] remove atom {best_j}  "
+                    f"contribution={best_contrib:.6f}  thresh={thresh:.6f}  "
+                    f"K={k}->{k-1}"
+                )
+            removed_log.append({
+                "removed_index": best_j,
+                "contribution": best_contrib,
+                "threshold": thresh,
+                "obj_before": obj_cur,
+                "obj_after": best_obj,
+            })
+            W_cur = best_W
+            A_cur = best_A
+            obj_cur = best_obj
+        else:
+            if verbose:
+                print(
+                    f"[TRUNC-GLOBAL] stop: cheapest removal costs "
+                    f"{best_contrib:.6f} > thresh={thresh:.6f}"
+                )
+            break
+
+    return W_cur, A_cur, float(obj_cur), removed_log
+
+
 def build_M_from_W(W: np.ndarray, A_atoms: np.ndarray, n: int, d: int) -> np.ndarray:
     if W.size == 0 or A_atoms.size == 0:
         return np.zeros((n, d), dtype=float)
@@ -436,7 +735,7 @@ def objective_coupled(
         L_norm_sq = float(np.sum(DDT ** 2))
 
         # tr(L A) = sum_{i,v} (DA)_{iv} * D_{iv}
-        if scipy.sparse.issparse(A_graph):
+        if _HAS_SCIPY and scipy.sparse.issparse(A_graph):
             DA = D @ A_graph                       # (K, n) sparse matmul
         else:
             DA = D @ A_graph                       # (K, n)
@@ -445,7 +744,7 @@ def objective_coupled(
         # ||A||^2_F — precomputed if provided
         if A_graph_norm_sq is not None:
             A_norm_sq = A_graph_norm_sq
-        elif scipy.sparse.issparse(A_graph):
+        elif _HAS_SCIPY and scipy.sparse.issparse(A_graph):
             A_norm_sq = float(A_graph.multiply(A_graph).sum())
         else:
             A_norm_sq = float(np.sum(A_graph ** 2))
@@ -484,6 +783,59 @@ def forward_atom_from_Q(Q: np.ndarray, ell: float, eps: float = 1e-12):
     else:
         a_new = -ell * (qv / nq)
     return a_new, v_star
+
+
+def forward_oracle_coupled_old(
+    D: np.ndarray,
+    A_graph,
+    Q_M: np.ndarray,
+    mu: float,
+    mu_graph: float = 0.0,
+    ell: float = 1.0,
+    n_alt_iters: int = 10,
+    eps: float = 1e-12,
+):
+    """
+    Original dense forward oracle (for debugging / comparison).
+
+    Same interface as forward_oracle_coupled but uses np.linalg.eigh
+    on the explicitly formed n×n matrix H.
+    """
+    n = D.shape[1] if D.shape[0] > 0 else Q_M.shape[0]
+    d = Q_M.shape[1]
+
+    # Build L and G explicitly
+    if D.shape[0] > 0:
+        L = D.T @ D
+        A_dense = A_graph
+        if _HAS_SCIPY and hasattr(A_graph, 'toarray'):
+            A_dense = np.asarray(A_graph.toarray())
+        G = 2.0 * mu_graph * (L - A_dense)
+    else:
+        G = np.zeros((n, n), dtype=float)
+
+    a = np.zeros(d, dtype=float)
+    e = np.zeros(n, dtype=float)
+
+    for _ in range(n_alt_iters):
+        # e-update: eigenvector with largest |eigenvalue| of G + Diag(mu * Q_M @ a)
+        H = G + np.diag(mu * (Q_M @ a))
+        H = 0.5 * (H + H.T)
+        eigvals, eigvecs = np.linalg.eigh(H)
+        i = np.argmax(np.abs(eigvals))
+        e = eigvecs[:, i]
+        l = np.abs(eigvals[i])
+
+        # a-update: a = -ell * Q_M^T(e^2) / ||Q_M^T(e^2)||
+        e_sq = e**2
+        g = Q_M.T @ e_sq
+        g_norm = float(np.linalg.norm(g))
+        if g_norm > eps:
+            a = -ell * g / g_norm
+        else:
+            a = np.zeros(d, dtype=float)
+
+    return np.sqrt(l) * e, a
 
 
 def forward_oracle_coupled(
@@ -531,7 +883,7 @@ def forward_oracle_coupled(
     a = np.zeros(d, dtype=float)
     e = np.zeros(n, dtype=float)
 
-    A_is_sparse = scipy.sparse.issparse(A_graph)
+    A_is_sparse = _HAS_SCIPY and scipy.sparse.issparse(A_graph)
 
     for _ in range(n_alt_iters):
         # e-update: find eigenvector with largest |eigenvalue| of H
@@ -555,35 +907,36 @@ def forward_oracle_coupled(
                 graph_part = np.zeros(len(x), dtype=float)
             return graph_part + diag_vec * x
 
-        H_op = scipy.sparse.linalg.LinearOperator(
-            shape=(n, n), matvec=_matvec, dtype=float
-        )
+        _use_iterative = _HAS_SCIPY and n > 50
 
-        # Find extremal eigenvalues (largest and smallest) to pick the one
-        # with largest absolute value
-        try:
-            # Get largest eigenvalue
-            eigvals_lg, eigvecs_lg = scipy.sparse.linalg.eigsh(
-                H_op, k=1, which='LA', tol=1e-6, maxiter=300
+        if _use_iterative:
+            H_op = scipy.sparse.linalg.LinearOperator(
+                shape=(n, n), matvec=_matvec, dtype=float
             )
-            # Get smallest eigenvalue
-            eigvals_sm, eigvecs_sm = scipy.sparse.linalg.eigsh(
-                H_op, k=1, which='SA', tol=1e-6, maxiter=300
-            )
+            try:
+                eigvals_lg, eigvecs_lg = scipy.sparse.linalg.eigsh(
+                    H_op, k=1, which='LA', tol=1e-6, maxiter=300
+                )
+                eigvals_sm, eigvecs_sm = scipy.sparse.linalg.eigsh(
+                    H_op, k=1, which='SA', tol=1e-6, maxiter=300
+                )
+                if abs(eigvals_lg[0]) >= abs(eigvals_sm[0]):
+                    l = abs(eigvals_lg[0])
+                    e = eigvecs_lg[:, 0]
+                else:
+                    l = abs(eigvals_sm[0])
+                    e = eigvecs_sm[:, 0]
+            except Exception:
+                _use_iterative = False  # fall through to dense
 
-            if abs(eigvals_lg[0]) >= abs(eigvals_sm[0]):
-                l = abs(eigvals_lg[0])
-                e = eigvecs_lg[:, 0]
-            else:
-                l = abs(eigvals_sm[0])
-                e = eigvecs_sm[:, 0]
-        except Exception:
-            # Fallback: if iterative solver fails, build H explicitly
+        if not _use_iterative:
+            # Dense fallback
             if D.shape[0] > 0:
                 L = D.T @ D
-                G = 2.0 * mu_graph * (L - A_graph)
+                A_dense = A_graph
                 if A_is_sparse:
-                    G = np.asarray(G)
+                    A_dense = np.asarray(A_graph.toarray())
+                G = 2.0 * mu_graph * (L - A_dense)
             else:
                 G = np.zeros((n, n), dtype=float)
             H = G + np.diag(diag_vec)
@@ -663,6 +1016,12 @@ def cogent_structured_atoms_with_W(
     mu_graph: float = 0.0,
     w_method: str = "fmd",
     fwd_alt_iters: int = 10,
+    merge_correlated: bool = False,
+    corr_thresh: float = 0.95,
+    corr_thresh_a: float | None = None,
+    trunc_method: str = "eta",
+    drop_frac: float = 0.01,
+    lookback: int = 3,
 ) -> dict:
     """
     CoGEnT-style solver for the coupled graph + feature objective:
@@ -701,7 +1060,7 @@ def cogent_structured_atoms_with_W(
         A_graph = np.zeros((n, n), dtype=float)
 
     # Precompute ||A_graph||^2_F once (used in efficient objective)
-    if scipy.sparse.issparse(A_graph):
+    if _HAS_SCIPY and scipy.sparse.issparse(A_graph):
         _A_graph_norm_sq = float(A_graph.multiply(A_graph).sum())
     else:
         _A_graph_norm_sq = float(np.sum(A_graph ** 2))
@@ -749,7 +1108,7 @@ def cogent_structured_atoms_with_W(
             )
             v_star = int(np.argmax(e_star**2))
 
-        rho_opt = 0
+        rho_opt = 0.1
 
         if mu_graph != 0.0 and (w_method == "d" or w_method == "d-spg" or w_method == "d-fw"):
             # D-reparameterization: use e_star^2 as the new atom's weight
@@ -793,28 +1152,84 @@ def cogent_structured_atoms_with_W(
         lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
 
         # after you computed obj_prev and obj_post
+        obj_final = obj_post
         if truncation:
-            W, A_atoms, obj_final, removed_log = truncation_backward_W(
-                X=X,
+            if trunc_method == "global":
+                W, A_atoms, obj_final, removed_log = truncation_global_W(
+                    X=X,
+                    W=W,
+                    A_atoms=A_atoms,
+                    gamma_obj=gamma_obj,
+                    obj_best_hist=obj_hist,
+                    drop_frac=drop_frac,
+                    lookback=lookback,
+                    ell=ell,
+                    trunc_refine_cycles=inner_alt_cycles,
+                    pg_max_iter=pg_max_iter,
+                    w_step_size=w_step_size,
+                    A_step_size=A_step_size,
+                    pg_tol=pg_tol,
+                    verbose=verbose,
+                    A_graph=A_graph,
+                    mu=mu,
+                    mu_graph=mu_graph,
+                    w_method=w_method,
+                    A_graph_norm_sq=_A_graph_norm_sq,
+                )
+            else:
+                # Default: per-iteration eta threshold
+                W, A_atoms, obj_final, removed_log = truncation_backward_W(
+                    X=X,
+                    W=W,
+                    A_atoms=A_atoms,
+                    gamma_obj=gamma_obj,
+                    obj_prev=obj_prev,
+                    obj_post=obj_post,
+                    eta=eta,
+                    ell=ell,
+                    trunc_refine_cycles=inner_alt_cycles,
+                    pg_max_iter=pg_max_iter,
+                    w_step_size=w_step_size,
+                    A_step_size=A_step_size,
+                    pg_tol=pg_tol,
+                    verbose=False,
+                    A_graph=A_graph,
+                    mu=mu,
+                    mu_graph=mu_graph,
+                    w_method=w_method,
+                    A_graph_norm_sq=_A_graph_norm_sq,
+                )
+
+        # ---- merge correlated atoms (heuristic) ----
+        if merge_correlated and W.shape[0] > 1:
+            W, A_atoms, n_merged = merge_correlated_atoms(
                 W=W,
                 A_atoms=A_atoms,
+                X=X,
                 gamma_obj=gamma_obj,
-                obj_prev=obj_prev,
-                obj_post=obj_post,
-                eta=eta,  # same role as in the paper threshold
                 ell=ell,
-                trunc_refine_cycles=inner_alt_cycles,  # or 0 if you want faster truncation
+                corr_thresh=corr_thresh,
+                corr_thresh_a=corr_thresh_a,
+                refine_cycles=inner_alt_cycles,
                 pg_max_iter=pg_max_iter,
                 w_step_size=w_step_size,
                 A_step_size=A_step_size,
                 pg_tol=pg_tol,
-                verbose=False,
+                eps=eps,
+                verbose=verbose,
                 A_graph=A_graph,
                 mu=mu,
                 mu_graph=mu_graph,
                 w_method=w_method,
-                A_graph_norm_sq=_A_graph_norm_sq,
             )
+            if n_merged > 0:
+                # Recompute objective after merges
+                M = build_M_from_W(W, A_atoms, n, d)
+                obj_final = objective_coupled(
+                    X, M, gamma_obj, W, A_graph=A_graph, mu=mu,
+                    mu_graph=mu_graph, eps=eps,
+                    A_graph_norm_sq=_A_graph_norm_sq,
+                )
 
         obj_hist.append(float(obj_final) if truncation else float(obj_post))
         info_hist.append(
@@ -866,18 +1281,20 @@ def cogent_structured_atoms_with_W(
 # ============================================================
 
 if __name__ == "__main__":
-    seed = 0
+    seed = 1
     np.random.seed(seed)
 
     d = 2
     ell = 1.0
     K_true = 3
-    n_per_cluster = 80
+    n_per_cluster = 200
     sigma = 0.15
     n = K_true * n_per_cluster
-    gamma_val = 0.75 / n_per_cluster
+    gamma_val = 0.75 / n
     mu_feature = 1.
+    mu_feature = 0.
     mu_graph = 1.0 / n
+    # mu_graph = 0.
 
     radii = [2.0, 1.6, 1.8]
     directions = random_sparse_directions(K_true, d, num_active=1, seed=seed)
@@ -894,10 +1311,15 @@ if __name__ == "__main__":
     )
 
     # ---- 2. Generate SBM graph ----
-    p_intra = 0.6
-    q_inter = 0.15
+    p_intra = 0.95
+    q_inter = 0.01
     A, A_bar = generate_sbm_graph(labels, p=p_intra, q=q_inter, seed=seed)
     n = X.shape[0]
+
+    # ---- Check theoretical recovery condition (Theorem 4.5) ----
+    from utils import compute_p_max
+    pmax_result = compute_p_max(A, labels, verbose=True)
+    print()
 
     result = solve_A_hard_assignments_cvxpy(
         X=X,
@@ -931,12 +1353,12 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=10,
-        init_with_one_atom=True,
+        max_iters=12,
+        init_with_one_atom=False,
         inner_alt_cycles=1,
-        pg_max_iter=200,
-        w_step_size=1e-2,
-        A_step_size=1e-3,
+        pg_max_iter=3500,
+        w_step_size=1e-1,
+        A_step_size=1e-2,
         pg_tol=1e-7,
         verbose=True,
         truncation=True,  # set to True to enable backward truncation
@@ -946,7 +1368,11 @@ if __name__ == "__main__":
         mu_graph=mu_graph,
         w_method="d",
         eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
-        fwd_alt_iters=20,
+        fwd_alt_iters=10,
+        trunc_method="eta",  # "eta" or "global"
+        merge_correlated=False,
+        corr_thresh=0.95,
+        corr_thresh_a=0.95,
     )
 
     print("\nFinal number of atoms:", res["A_atoms"].shape[0])
