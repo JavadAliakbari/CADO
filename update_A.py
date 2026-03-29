@@ -200,29 +200,9 @@ def update_A_projected_gradient(
 
         # while True:
         A_candidate = project_rows_to_l2_ball(A - step_size * G, ell, eps=eps)
-        # candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
-
-        # if (not use_backtracking) or (candidate_obj <= current_obj):
-        #     accepted = True
-        #     break
-
-        # step *= backtracking_beta
-        # if step < min_step_size:
-        #     break
-
-        # if not accepted:
-        #     if verbose:
-        #         print(f"[A-PG] stop at iter {it}: step too small.")
-        #     break
 
         rel_change = np.linalg.norm(A_candidate - A) / max(np.linalg.norm(A), 1e-12)
         A = A_candidate
-        # current_obj = candidate_obj
-
-        # if verbose and (it % 25 == 0 or it == max_iter - 1):
-        #     print(
-        #         f"[A-PG] iter={it:4d}, obj={current_obj:.8e}, step={step_size:.3e}, rel_change={rel_change:.3e}"
-        #     )
 
         if rel_change < tol:
             break

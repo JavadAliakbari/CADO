@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 try:
     import scipy.sparse
     import scipy.sparse.linalg
+
     _HAS_SCIPY = True
 except ImportError:
     _HAS_SCIPY = False
@@ -181,149 +182,6 @@ def remove_atom_and_reproject_W(W: np.ndarray, j: int) -> np.ndarray:
     return W_new
 
 
-def merge_correlated_atoms(
-    W: np.ndarray,
-    A_atoms: np.ndarray,
-    X: np.ndarray,
-    gamma_obj: float,
-    ell: float,
-    corr_thresh: float = 0.95,
-    corr_thresh_a: float | None = None,
-    refine_cycles: int = 2,
-    pg_max_iter: int = 300,
-    w_step_size: float = 1e-2,
-    A_step_size: float = 1e-3,
-    pg_tol: float = 1e-6,
-    eps: float = 1e-12,
-    verbose: bool = False,
-    A_graph: np.ndarray | None = None,
-    mu: float = 1.0,
-    mu_graph: float = 0.0,
-    w_method: str = "fmd",
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """
-    Heuristic: merge atoms that are too similar, based on either:
-      1. Weight-pattern similarity: cosine(D[i,:], D[j,:]) > corr_thresh
-      2. Atom similarity: cosine(a_i, a_j) > corr_thresh_a
-
-    If corr_thresh_a is None, it defaults to corr_thresh.
-
-    At each step the pair with the highest similarity (across both criteria)
-    is merged first. The merge keeps going until no pair exceeds either
-    threshold.
-
-    Merging rule for atoms i, j:
-        w_merged = w_i + w_j  (sum of weights, then reproject to simplex)
-        a_merged = (lam_i * a_i + lam_j * a_j) / (lam_i + lam_j)
-                   projected back onto the l2 ball of radius ell.
-
-    After each merge, alternating_WA_refinement is called to re-optimize.
-
-    Returns (W, A_atoms, n_merged).
-    """
-    if corr_thresh_a is None:
-        corr_thresh_a = corr_thresh
-
-    n_merged = 0
-
-    while W.shape[0] > 1:
-        K = W.shape[0]
-
-        # --- Weight-pattern (D-row) cosine similarity ---
-        D = np.sqrt(np.maximum(W, eps))  # (K, n)
-        d_norms = np.linalg.norm(D, axis=1, keepdims=True)
-        d_norms = np.maximum(d_norms, eps)
-        C_w = (D / d_norms) @ (D / d_norms).T  # (K, K)
-        np.fill_diagonal(C_w, 0.0)
-        C_w = np.triu(C_w)
-
-        # --- Atom (A-row) cosine similarity ---
-        a_norms = np.linalg.norm(A_atoms, axis=1, keepdims=True)  # (K, 1)
-        a_norms = np.maximum(a_norms, eps)
-        C_a = (A_atoms / a_norms) @ (A_atoms / a_norms).T  # (K, K)
-        np.fill_diagonal(C_a, 0.0)
-        C_a = np.triu(C_a)
-
-        # Find the best candidate from each criterion
-        max_w = float(np.max(C_w))
-        max_a = float(np.max(C_a))
-
-        # Check which (if any) exceeds its threshold; pick the higher one
-        w_exceeds = max_w >= corr_thresh
-        a_exceeds = max_a >= corr_thresh_a
-        if not w_exceeds and not a_exceeds:
-            break  # Nothing to merge
-
-        if w_exceeds and a_exceeds:
-            # Both exceed — pick whichever pair has higher similarity
-            if max_w >= max_a:
-                i, j = np.unravel_index(np.argmax(C_w), C_w.shape)
-                reason = f"D-cosine={max_w:.4f}"
-            else:
-                i, j = np.unravel_index(np.argmax(C_a), C_a.shape)
-                reason = f"A-cosine={max_a:.4f}"
-        elif w_exceeds:
-            i, j = np.unravel_index(np.argmax(C_w), C_w.shape)
-            reason = f"D-cosine={max_w:.4f}"
-        else:
-            i, j = np.unravel_index(np.argmax(C_a), C_a.shape)
-            reason = f"A-cosine={max_a:.4f}"
-
-        # Merge atoms i and j
-        lam_i = float(np.sum(W[i]))
-        lam_j = float(np.sum(W[j]))
-        w_merged = W[i] + W[j]
-
-        # Atom merge: weighted average, project to l2 ball
-        if lam_i + lam_j > eps:
-            a_merged = (lam_i * A_atoms[i] + lam_j * A_atoms[j]) / (lam_i + lam_j)
-        else:
-            a_merged = 0.5 * (A_atoms[i] + A_atoms[j])
-        a_norm = float(np.linalg.norm(a_merged))
-        if a_norm > ell:
-            a_merged = ell * a_merged / a_norm
-
-        if verbose:
-            print(
-                f"[MERGE] atoms {i},{j}  {reason}  "
-                f"lam=({lam_i:.3f},{lam_j:.3f})  K={K}->{K-1}"
-            )
-
-        # Replace atom i with merged, remove atom j
-        W[i] = w_merged
-        A_atoms[i] = a_merged
-        W = np.delete(W, j, axis=0)
-        A_atoms = np.delete(A_atoms, j, axis=0)
-
-        # Reproject W columns to simplex
-        W = project_columns_to_simplex(W)
-
-        # Re-optimize
-        if refine_cycles > 0:
-            W, A_atoms = alternating_WA_refinement(
-                W=W,
-                A=A_atoms,
-                X=X,
-                gamma_obj=gamma_obj,
-                ell=ell,
-                num_cycles=refine_cycles,
-                w_step_size=w_step_size,
-                A_step_size=A_step_size,
-                max_iter=pg_max_iter,
-                tol=pg_tol,
-                eps=eps,
-                verbose=False,
-                A_graph=A_graph,
-                mu=mu,
-                mu_graph=mu_graph,
-                w_method=w_method,
-            )
-
-        n_merged += 1
-
-    return W, A_atoms, n_merged
-
-
 def truncation_backward_W(
     X: np.ndarray,
     W: np.ndarray,
@@ -375,7 +233,14 @@ def truncation_backward_W(
 
     M_cur = build_M_from_W(W_cur, A_cur, n, d)
     obj_cur = objective_coupled(
-        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+        X,
+        M_cur,
+        gamma_obj,
+        W_cur,
+        A_graph=A_graph,
+        mu=mu,
+        mu_graph=mu_graph,
+        eps=eps,
         A_graph_norm_sq=A_graph_norm_sq,
     )
 
@@ -535,8 +400,15 @@ def truncation_global_W(
 
     M_cur = build_M_from_W(W_cur, A_cur, n, d)
     obj_cur = objective_coupled(
-        X, M_cur, gamma_obj, W_cur, A_graph=A_graph, mu=mu, mu_graph=mu_graph,
-        eps=eps, A_graph_norm_sq=A_graph_norm_sq,
+        X,
+        M_cur,
+        gamma_obj,
+        W_cur,
+        A_graph=A_graph,
+        mu=mu,
+        mu_graph=mu_graph,
+        eps=eps,
+        A_graph_norm_sq=A_graph_norm_sq,
     )
 
     # Compute the global improvement budget
@@ -574,19 +446,34 @@ def truncation_global_W(
                         "ell must be provided when trunc_refine_cycles > 0."
                     )
                 W_try, A_try = alternating_WA_refinement(
-                    W=W_try, A=A_try, X=X,
-                    gamma_obj=gamma_obj, ell=ell,
+                    W=W_try,
+                    A=A_try,
+                    X=X,
+                    gamma_obj=gamma_obj,
+                    ell=ell,
                     num_cycles=trunc_refine_cycles,
-                    w_step_size=w_step_size, A_step_size=A_step_size,
-                    max_iter=pg_max_iter, tol=pg_tol, eps=eps,
-                    verbose=False, A_graph=A_graph,
-                    mu=mu, mu_graph=mu_graph, w_method=w_method,
+                    w_step_size=w_step_size,
+                    A_step_size=A_step_size,
+                    max_iter=pg_max_iter,
+                    tol=pg_tol,
+                    eps=eps,
+                    verbose=False,
+                    A_graph=A_graph,
+                    mu=mu,
+                    mu_graph=mu_graph,
+                    w_method=w_method,
                 )
 
             M_try = build_M_from_W(W_try, A_try, n, d)
             obj_try = objective_coupled(
-                X, M_try, gamma_obj, W_try, A_graph=A_graph,
-                mu=mu, mu_graph=mu_graph, eps=eps,
+                X,
+                M_try,
+                gamma_obj,
+                W_try,
+                A_graph=A_graph,
+                mu=mu,
+                mu_graph=mu_graph,
+                eps=eps,
                 A_graph_norm_sq=A_graph_norm_sq,
             )
 
@@ -613,13 +500,15 @@ def truncation_global_W(
                     f"contribution={best_contrib:.6f}  thresh={thresh:.6f}  "
                     f"K={k}->{k-1}"
                 )
-            removed_log.append({
-                "removed_index": best_j,
-                "contribution": best_contrib,
-                "threshold": thresh,
-                "obj_before": obj_cur,
-                "obj_after": best_obj,
-            })
+            removed_log.append(
+                {
+                    "removed_index": best_j,
+                    "contribution": best_contrib,
+                    "threshold": thresh,
+                    "obj_before": obj_cur,
+                    "obj_after": best_obj,
+                }
+            )
             W_cur = best_W
             A_cur = best_A
             obj_cur = best_obj
@@ -729,27 +618,14 @@ def objective_coupled(
 
     graph_term = 0.0
     if mu_graph != 0.0 and A_graph is not None and W.shape[0] > 0:
-        D = np.sqrt(np.maximum(W, eps))           # (K, n)
-        DDT = D @ D.T                              # (K, K) — cheap
-        # ||L||^2_F = ||DD^T||^2_F = tr((DD^T)^2)
-        L_norm_sq = float(np.sum(DDT ** 2))
+        D = np.sqrt(np.maximum(W, eps))  # (K, n)
 
-        # tr(L A) = sum_{i,v} (DA)_{iv} * D_{iv}
+        # <L, A_bar> = tr(D A_bar D^T) = sum(D @ A_bar * D)
         if _HAS_SCIPY and scipy.sparse.issparse(A_graph):
-            DA = D @ A_graph                       # (K, n) sparse matmul
+            DA_bar = D @ A_graph  # (K, n) sparse matmul
         else:
-            DA = D @ A_graph                       # (K, n)
-        trLA = float(np.sum(DA * D))
-
-        # ||A||^2_F — precomputed if provided
-        if A_graph_norm_sq is not None:
-            A_norm_sq = A_graph_norm_sq
-        elif _HAS_SCIPY and scipy.sparse.issparse(A_graph):
-            A_norm_sq = float(A_graph.multiply(A_graph).sum())
-        else:
-            A_norm_sq = float(np.sum(A_graph ** 2))
-
-        graph_term = L_norm_sq - 2.0 * trLA + A_norm_sq
+            DA_bar = D @ A_graph  # (K, n)
+        graph_term = -float(np.sum(DA_bar * D))  # -<L, A_bar>
 
     return mu_graph * graph_term + mu * clust
 
@@ -804,15 +680,11 @@ def forward_oracle_coupled_old(
     n = D.shape[1] if D.shape[0] > 0 else Q_M.shape[0]
     d = Q_M.shape[1]
 
-    # Build L and G explicitly
-    if D.shape[0] > 0:
-        L = D.T @ D
-        A_dense = A_graph
-        if _HAS_SCIPY and hasattr(A_graph, 'toarray'):
-            A_dense = np.asarray(A_graph.toarray())
-        G = 2.0 * mu_graph * (L - A_dense)
-    else:
-        G = np.zeros((n, n), dtype=float)
+    # Build G = -mu_graph * A_bar (no longer depends on L)
+    A_dense = A_graph
+    if _HAS_SCIPY and hasattr(A_graph, "toarray"):
+        A_dense = np.asarray(A_graph.toarray())
+    G = -mu_graph * A_dense
 
     a = np.zeros(d, dtype=float)
     e = np.zeros(n, dtype=float)
@@ -891,18 +763,21 @@ def forward_oracle_coupled(
         # Implicit matvec: Hx = 2*mu_graph*(D^T(Dx) - A_graph @ x) + diag_vec * x
         diag_vec = mu * (Q_M @ a)  # (n,)
 
-        def _matvec(x, D=D, A_graph=A_graph, mu_graph=mu_graph,
-                    diag_vec=diag_vec, A_is_sparse=A_is_sparse):
+        def _matvec(
+            x,
+            A_graph=A_graph,
+            mu_graph=mu_graph,
+            diag_vec=diag_vec,
+            A_is_sparse=A_is_sparse,
+        ):
             x = np.asarray(x, dtype=float).ravel()
-            # Graph part: 2*mu_graph * (D^T(Dx) - Ax)
-            if mu_graph != 0.0 and D.shape[0] > 0:
-                Dx = D @ x                         # (K,)
-                DTDx = D.T @ Dx                     # (n,)
+            # Graph part: -mu_graph * A_bar @ x
+            if mu_graph != 0.0 and A_graph is not None:
                 if A_is_sparse:
-                    Ax = A_graph @ x                # (n,)
+                    Ax = A_graph @ x  # (n,)
                 else:
-                    Ax = A_graph @ x                # (n,)
-                graph_part = 2.0 * mu_graph * (DTDx - Ax)
+                    Ax = A_graph @ x  # (n,)
+                graph_part = -mu_graph * Ax
             else:
                 graph_part = np.zeros(len(x), dtype=float)
             return graph_part + diag_vec * x
@@ -915,10 +790,10 @@ def forward_oracle_coupled(
             )
             try:
                 eigvals_lg, eigvecs_lg = scipy.sparse.linalg.eigsh(
-                    H_op, k=1, which='LA', tol=1e-6, maxiter=300
+                    H_op, k=1, which="LA", tol=1e-6, maxiter=300
                 )
                 eigvals_sm, eigvecs_sm = scipy.sparse.linalg.eigsh(
-                    H_op, k=1, which='SA', tol=1e-6, maxiter=300
+                    H_op, k=1, which="SA", tol=1e-6, maxiter=300
                 )
                 if abs(eigvals_lg[0]) >= abs(eigvals_sm[0]):
                     l = abs(eigvals_lg[0])
@@ -931,12 +806,11 @@ def forward_oracle_coupled(
 
         if not _use_iterative:
             # Dense fallback
-            if D.shape[0] > 0:
-                L = D.T @ D
+            if A_graph is not None and mu_graph != 0.0:
                 A_dense = A_graph
                 if A_is_sparse:
                     A_dense = np.asarray(A_graph.toarray())
-                G = 2.0 * mu_graph * (L - A_dense)
+                G = -mu_graph * A_dense
             else:
                 G = np.zeros((n, n), dtype=float)
             H = G + np.diag(diag_vec)
@@ -1063,7 +937,7 @@ def cogent_structured_atoms_with_W(
     if _HAS_SCIPY and scipy.sparse.issparse(A_graph):
         _A_graph_norm_sq = float(A_graph.multiply(A_graph).sum())
     else:
-        _A_graph_norm_sq = float(np.sum(A_graph ** 2))
+        _A_graph_norm_sq = float(np.sum(A_graph**2))
 
     W = np.zeros((0, n), dtype=float)
     A_atoms = np.zeros((0, d), dtype=float)
@@ -1079,7 +953,14 @@ def cogent_structured_atoms_with_W(
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
         obj_prev = objective_coupled(
-            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+            X,
+            M,
+            gamma_obj,
+            W,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
+            eps=eps,
             A_graph_norm_sq=_A_graph_norm_sq,
         )
 
@@ -1110,7 +991,9 @@ def cogent_structured_atoms_with_W(
 
         rho_opt = 0.1
 
-        if mu_graph != 0.0 and (w_method == "d" or w_method == "d-spg" or w_method == "d-fw"):
+        if mu_graph != 0.0 and (
+            w_method == "d" or w_method == "d-spg" or w_method == "d-fw"
+        ):
             # D-reparameterization: use e_star^2 as the new atom's weight
             # pattern (non-uniform) with rho >= 1e-3 to break symmetry.
             # e_star = np.ones(n, dtype=float)
@@ -1145,7 +1028,14 @@ def cogent_structured_atoms_with_W(
 
         M = build_M_from_W(W, A_atoms, n, d)
         obj_post = objective_coupled(
-            X, M, gamma_obj, W, A_graph=A_graph, mu=mu, mu_graph=mu_graph, eps=eps,
+            X,
+            M,
+            gamma_obj,
+            W,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
+            eps=eps,
             A_graph_norm_sq=_A_graph_norm_sq,
         )
 
@@ -1197,37 +1087,6 @@ def cogent_structured_atoms_with_W(
                     mu=mu,
                     mu_graph=mu_graph,
                     w_method=w_method,
-                    A_graph_norm_sq=_A_graph_norm_sq,
-                )
-
-        # ---- merge correlated atoms (heuristic) ----
-        if merge_correlated and W.shape[0] > 1:
-            W, A_atoms, n_merged = merge_correlated_atoms(
-                W=W,
-                A_atoms=A_atoms,
-                X=X,
-                gamma_obj=gamma_obj,
-                ell=ell,
-                corr_thresh=corr_thresh,
-                corr_thresh_a=corr_thresh_a,
-                refine_cycles=inner_alt_cycles,
-                pg_max_iter=pg_max_iter,
-                w_step_size=w_step_size,
-                A_step_size=A_step_size,
-                pg_tol=pg_tol,
-                eps=eps,
-                verbose=verbose,
-                A_graph=A_graph,
-                mu=mu,
-                mu_graph=mu_graph,
-                w_method=w_method,
-            )
-            if n_merged > 0:
-                # Recompute objective after merges
-                M = build_M_from_W(W, A_atoms, n, d)
-                obj_final = objective_coupled(
-                    X, M, gamma_obj, W, A_graph=A_graph, mu=mu,
-                    mu_graph=mu_graph, eps=eps,
                     A_graph_norm_sq=_A_graph_norm_sq,
                 )
 
@@ -1288,11 +1147,11 @@ if __name__ == "__main__":
     ell = 1.0
     K_true = 3
     n_per_cluster = 200
-    sigma = 0.15
+    sigma = 0.1
     n = K_true * n_per_cluster
     gamma_val = 0.75 / n
-    mu_feature = 1.
-    mu_feature = 0.
+    mu_feature = 1.0
+    mu_feature = 0.0
     mu_graph = 1.0 / n
     # mu_graph = 0.
 
@@ -1311,13 +1170,14 @@ if __name__ == "__main__":
     )
 
     # ---- 2. Generate SBM graph ----
-    p_intra = 0.95
-    q_inter = 0.01
+    p_intra = 0.7
+    q_inter = 0.3
     A, A_bar = generate_sbm_graph(labels, p=p_intra, q=q_inter, seed=seed)
     n = X.shape[0]
 
     # ---- Check theoretical recovery condition (Theorem 4.5) ----
     from utils import compute_p_max
+
     pmax_result = compute_p_max(A, labels, verbose=True)
     print()
 
@@ -1335,7 +1195,7 @@ if __name__ == "__main__":
     # obj_check = objective_from_WA(X, W_true, A_opt, gamma_val)
     M = build_M_from_W(W_true, A_opt, n, d)
     obj_check = objective_coupled(
-        X, M, gamma_val, W_true, A_graph=A, mu=mu_feature, mu_graph=mu_graph
+        X, M, gamma_val, W_true, A_graph=A_bar, mu=mu_feature, mu_graph=mu_graph
     )
 
     print("Status:", result["status"])
@@ -1363,7 +1223,7 @@ if __name__ == "__main__":
         verbose=True,
         truncation=True,  # set to True to enable backward truncation
         seed=seed,
-        A_graph=A,
+        A_graph=A_bar,
         mu=mu_feature,
         mu_graph=mu_graph,
         w_method="d",

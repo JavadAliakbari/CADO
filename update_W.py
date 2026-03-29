@@ -756,14 +756,8 @@ def compute_D_gradient(
     eps: float = 1e-12,
 ) -> np.ndarray:
     """Gradient of the coupled objective w.r.t. D.  No 1/sqrt(W) singularity."""
-    # Graph term: 4 * mu_graph * D @ (D^T D - A_graph)
-    # L = D.T @ D  # (n, n)
-    # R = L - A_graph  # (n, n)
-    # G_D = 4.0 * mu_graph * (D @ R)  # (k, n)
-
-    DDT = D @ D.T
-    DA = D @ A_graph
-    G_D = 4.0 * mu_graph * (DDT @ D - DA)
+    # Graph term: gradient of -mu_graph * <L, A_bar> w.r.t. D = -2*mu_graph * D @ A_bar
+    G_D = -2.0 * mu_graph * (D @ A_graph)
 
     ## check if the two grads are the same
     # print("G_D vs G_D_new diff:", np.linalg.norm(G_D - G_D_new))
@@ -790,12 +784,6 @@ def _project_columns_to_nonneg_sphere(D: np.ndarray, eps: float = 1e-12) -> np.n
     D = np.maximum(D, 0.0)
     norms = np.linalg.norm(D, axis=0, keepdims=True)
     return D / np.maximum(norms, eps)
-
-
-
-
-
-
 
 
 def update_W_D_reparam(
@@ -853,7 +841,6 @@ def update_W_D_reparam(
             break
 
     return D * D  # W = D^2
-
 
 
 def update_W_D_reparam_SPG(
@@ -932,7 +919,7 @@ def update_W_D_reparam_SPG(
         else:
             alpha = step_size
 
-        D = cp.deepcopy(D_new)  
+        D = cp.deepcopy(D_new)
         G_D = cp.deepcopy(G_D_new)
 
         if verbose and (it % 25 == 0 or it == max_iter - 1):
@@ -946,8 +933,6 @@ def update_W_D_reparam_SPG(
             break
 
     return D * D
-
-
 
 
 def update_W_D_reparam_FW(
@@ -1042,6 +1027,7 @@ def update_W_D_reparam_FW(
         D = (1.0 - eta) * D + eta * S
 
     return D * D
+
 
 # ============================================================
 # Unified chooser
@@ -1210,7 +1196,9 @@ def update_W(
             verbose=verbose,
         )
 
-    raise ValueError(f"Unknown method '{method}'. Use one of: pg, bcd, md, fmd, fw, d, d-spg.")
+    raise ValueError(
+        f"Unknown method '{method}'. Use one of: pg, bcd, md, fmd, fw, d, d-spg."
+    )
 
 
 # ============================================================
