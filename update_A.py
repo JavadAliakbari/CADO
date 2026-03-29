@@ -174,7 +174,7 @@ def update_A_projected_gradient(
     max_iter: int = 300,
     tol: float = 1e-6,
     eps: float = 1e-12,
-    mu = 1.0,
+    mu=1.0,
     use_backtracking: bool = True,
     backtracking_beta: float = 0.5,
     min_step_size: float = 1e-14,
@@ -183,26 +183,89 @@ def update_A_projected_gradient(
     """
     Projected subgradient descent for the original A objective.
     """
-    # A = np.asarray(A_init, dtype=float).copy()
-    # W = np.asarray(W, dtype=float)
-    # X = np.asarray(X, dtype=float)
     A = A_init
     step_size = 0.001
-
-    # A = project_rows_to_l2_ball(A, ell, eps=eps)
-    # current_obj = objective_A_original(A, W, X, gamma_obj)
 
     for it in range(max_iter):
         G = mu * compute_A_subgradient_original_fast(A, W, X, gamma_obj, eps=eps)
 
-        # step = step_size
-        # accepted = False
-
-        # while True:
         A_candidate = project_rows_to_l2_ball(A - step_size * G, ell, eps=eps)
 
         rel_change = np.linalg.norm(A_candidate - A) / max(np.linalg.norm(A), 1e-12)
         A = A_candidate
+
+        if rel_change < tol:
+            break
+
+    return A
+
+
+# ============================================================
+# 1b) Projected Adam (momentum-based gradient descent)
+# ============================================================
+
+
+def update_A_projected_adam(
+    A_init: np.ndarray,
+    W: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    ell: float,
+    step_size: float = 1e-3,
+    max_iter: int = 300,
+    tol: float = 1e-6,
+    eps: float = 1e-12,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    adam_eps: float = 1e-8,
+    verbose: bool = False,
+) -> np.ndarray:
+    """
+    Projected Adam optimizer for the original A objective.
+
+    Uses Adam's adaptive learning rate with momentum, then projects
+    each row of A onto the l2 ball constraint.
+
+    Parameters
+    ----------
+    beta1 : float
+        Exponential decay rate for first moment estimates (momentum).
+    beta2 : float
+        Exponential decay rate for second moment estimates (RMSprop-like).
+    adam_eps : float
+        Small constant for numerical stability in Adam update.
+    """
+    A = A_init.copy()
+
+    # Initialize first and second moment estimates
+    m = np.zeros_like(A)  # First moment (momentum)
+    v = np.zeros_like(A)  # Second moment (adaptive learning rate)
+
+    for it in range(max_iter):
+        G = compute_A_subgradient_original_fast(A, W, X, gamma_obj, eps=eps)
+
+        # Update biased first moment estimate
+        m = beta1 * m + (1 - beta1) * G
+        # Update biased second raw moment estimate
+        v = beta2 * v + (1 - beta2) * (G * G)
+
+        # Compute bias-corrected first moment estimate
+        m_hat = m / (1 - beta1 ** (it + 1))
+        # Compute bias-corrected second raw moment estimate
+        v_hat = v / (1 - beta2 ** (it + 1))
+
+        # Adam update direction
+        update = m_hat / (np.sqrt(v_hat) + adam_eps)
+
+        # Gradient step followed by projection
+        A_candidate = project_rows_to_l2_ball(A - step_size * update, ell, eps=eps)
+
+        rel_change = np.linalg.norm(A_candidate - A) / max(np.linalg.norm(A), 1e-12)
+        A = A_candidate
+
+        if verbose and (it % 25 == 0 or it == max_iter - 1):
+            obj = objective_A_original(A, W, X, gamma_obj)
+            print(f"[A-Adam] iter={it:4d}, obj={obj:.8e}, rel_change={rel_change:.3e}")
 
         if rel_change < tol:
             break
@@ -506,6 +569,21 @@ def update_A(
             **kwargs,
         )
 
+    if method == "pg_adam":
+        return update_A_projected_adam(
+            A_init=A_init,
+            W=W,
+            X=X,
+            gamma_obj=gamma_obj,
+            ell=ell,
+            step_size=step_size,
+            max_iter=max_iter,
+            tol=tol,
+            eps=eps,
+            verbose=verbose,
+            **kwargs,
+        )
+
     if method == "bcd":
         return update_A_block_coordinate_descent(
             A_init=A_init,
@@ -553,7 +631,9 @@ def update_A(
             **kwargs,
         )
 
-    raise ValueError("Unknown method. Use one of: 'pg', 'bcd', 'fista', 'qn'.")
+    raise ValueError(
+        "Unknown method. Use one of: 'pg', 'pg_adam', 'bcd', 'fista', 'qn'."
+    )
 
 
 # ============================================================

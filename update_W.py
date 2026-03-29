@@ -403,9 +403,6 @@ def update_W_mirror_descent_full(
     max_iter: int = 200,
     tol: float = 1e-6,
     eps: float = 1e-12,
-    use_backtracking: bool = True,
-    backtracking_beta: float = 0.5,
-    min_step_size: float = 1e-14,
     verbose: bool = False,
 ):
     """
@@ -417,13 +414,6 @@ def update_W_mirror_descent_full(
     W = W_init
     B = A @ A.T
     AX = A @ X.T
-    # k, n = W.shape
-
-    # make sure W is feasible
-    # W = np.maximum(W, eps)
-    # W /= W.sum(axis=0, keepdims=True)
-
-    # current_obj = objective_W_original(W, A, X, gamma_obj)
 
     for it in range(max_iter):
         G = compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
