@@ -219,6 +219,46 @@ def compute_single_column_subgradient_original(
     return g
 
 
+def compute_D_gradient_clust(
+    D: np.ndarray,
+    A_atoms: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    B: np.ndarray | None = None,
+    AX: np.ndarray | None = None,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    Subgradient of the clustering (feature) term w.r.t. D = sqrt(W).
+
+    The clustering objective is F_clust(W) = ||X - W^T A||^2 + gamma * SON(W).
+    Since W_{iv} = D_{iv}^2, the chain rule gives:
+
+        dF_clust/dD_{iv} = dF_clust/dW_{iv} * 2 * D_{iv}
+
+    i.e. G_D = 2 * D * G_W  where G_W = compute_W_subgradient_original_fast(D^2, ...).
+
+    Parameters
+    ----------
+    D : (K, n) ndarray  — D = sqrt(W), columns on the non-negative unit sphere.
+    A_atoms : (K, d) ndarray  — atom matrix.
+    X : (n, d) ndarray  — data matrix.
+    gamma_obj : float  — SON regularisation weight.
+    B : (K, K) ndarray or None  — precomputed A @ A.T.
+    AX : (K, n) ndarray or None  — precomputed A @ X.T.
+    eps : float  — numerical floor.
+
+    Returns
+    -------
+    G_D : (K, n) ndarray
+    """
+    W = D * D  # W_{iv} = D_{iv}^2
+    G_W = compute_W_subgradient_original_fast(
+        W, A_atoms, X, B=B, AX=AX, gamma_obj=gamma_obj, eps=eps
+    )
+    return 2.0 * D * G_W
+
+
 # ============================================================
 # 1) Projected gradient / subgradient
 # ============================================================
@@ -233,10 +273,9 @@ def update_W_projected_gradient_original(
     max_iter: int = 300,
     tol: float = 1e-6,
     eps: float = 1e-12,
-    use_backtracking: bool = True,
-    backtracking_beta: float = 0.5,
-    min_step_size: float = 1e-14,
-    verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
 ) -> np.ndarray:
     W = np.asarray(W_init, dtype=float).copy()
     A = np.asarray(A, dtype=float)
@@ -247,42 +286,22 @@ def update_W_projected_gradient_original(
     for v in range(W.shape[1]):
         W[:, v] = project_to_simplex(W[:, v])
 
-    current_obj = objective_W_original(W, A, X, gamma_obj)
-
     for it in range(max_iter):
-        G = compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
+        G = mu * compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
 
-        step = step_size
-        accepted = False
+        # Graph term: gradient of -mu_graph * <L, A_bar> w.r.t. W
+        if mu_graph != 0.0 and A_graph is not None:
+            D = np.sqrt(np.maximum(W, eps))  # (K, n)
+            G -= mu_graph * (D @ A_graph) / D  # elementwise
 
-        while True:
-            W_candidate = W - step * G
-            # Vectorized simplex projection for all columns
-            W_candidate = project_columns_to_simplex(W_candidate)
-
-            candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
-
-            if (not use_backtracking) or (candidate_obj <= current_obj):
-                accepted = True
-                break
-
-            step *= backtracking_beta
-            if step < min_step_size:
-                break
-
-        if not accepted:
-            if verbose:
-                print(f"[PG] stop at iter {it}: step too small.")
-            break
+        W_candidate = W - step_size * G
+        # Vectorized simplex projection for all columns
+        W_candidate = project_columns_to_simplex(W_candidate)
+        # for v in range(W_candidate.shape[1]):
+        #     W_candidate[:, v] = project_to_simplex(W_candidate[:, v])
 
         rel_change = np.linalg.norm(W_candidate - W) / max(np.linalg.norm(W), 1e-12)
         W = W_candidate
-        current_obj = candidate_obj
-
-        if verbose and (it % 25 == 0 or it == max_iter - 1):
-            print(
-                f"[PG] iter={it:4d}, obj={current_obj:.8e}, step={step:.3e}, rel_change={rel_change:.3e}"
-            )
 
         if rel_change < tol:
             break
@@ -310,6 +329,9 @@ def update_W_block_coordinate_descent(
     randomized: bool = False,
     seed: int | None = None,
     verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
 ) -> np.ndarray:
     """
     Block coordinate descent updating one column w_v at a time.
@@ -333,9 +355,15 @@ def update_W_block_coordinate_descent(
             rng.shuffle(order)
 
         for v in order:
-            g_v = compute_single_column_subgradient_original(
+            g_v = mu * compute_single_column_subgradient_original(
                 W=W, A=A, X=X, gamma_obj=gamma_obj, v=v, B=B, eps=eps
             )
+
+            # Graph term: gradient of -mu_graph * <L, A_bar> w.r.t. w_v
+            if mu_graph != 0.0 and A_graph is not None:
+                D_v = np.sqrt(np.maximum(W[:, v], eps))  # (K,)
+                DA_bar_v = np.sqrt(np.maximum(W, eps)) @ A_graph[:, v]  # (K,)
+                g_v -= mu_graph * DA_bar_v / D_v  # elementwise
 
             step = step_size
             accepted = False
@@ -404,53 +432,53 @@ def update_W_mirror_descent_full(
     tol: float = 1e-6,
     eps: float = 1e-12,
     verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    mu: float = 1.0,
+    mu_graph: float = 0.0,
 ):
     """
     Full-matrix mirror descent for W.
 
     Each column of W stays on the simplex.
     """
-    # W = np.asarray(W_init, dtype=float).copy()
     W = W_init
     B = A @ A.T
     AX = A @ X.T
 
     for it in range(max_iter):
-        G = compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
-
-        # step = step_size
-        # accepted = False
-
-        # while True:
-        Z = np.log(np.maximum(W, eps)) - step_size * G
-        Z -= np.max(Z, axis=0, keepdims=True)  # stability
-        W_candidate = np.exp(Z)
-        W_candidate /= np.sum(W_candidate, axis=0, keepdims=True)
-
-        # candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
-
-        # if (not use_backtracking) or (candidate_obj <= current_obj):
-        #     accepted = True
-        #     break
-
-        # step *= backtracking_beta
-        # if step < min_step_size:
-        #     break
-
-        # if not accepted:
-        #     if verbose:
-        #         print(f"[W-MD-full] stop at iter {it}: step too small.")
-        #     break
+        if mu_graph == 0.0:
+            # Feature-only: entropic mirror descent in W-space (no singularity).
+            G = mu * compute_W_subgradient_original_fast(
+                W, A, X, B, AX, gamma_obj, eps=eps
+            )
+            Z = np.log(np.maximum(W, eps)) - step_size * G
+            Z -= np.max(Z, axis=0, keepdims=True)  # stability
+            W_candidate = np.exp(Z)
+            W_candidate /= np.sum(W_candidate, axis=0, keepdims=True)
+        else:
+            # Graph or combined: D-space mirror descent (exponentiated gradient).
+            #
+            # W-space MD fails because the W-gradient of -<L,A_bar> has a 1/D
+            # singularity that makes the exponent blow up.  D-space PG also fails
+            # for combined because a fixed Euclidean step can't handle the scale
+            # mismatch between the graph term O(mu_graph·n) and feature term.
+            #
+            # D-space MD is scale-adaptive (like W-space MD) and smooth everywhere:
+            #   d_iv' ∝ d_iv * exp(-η G_D_iv),  then normalize columns to unit L2.
+            D = np.sqrt(np.maximum(W, eps))
+            G_D = compute_D_gradient(D, A, X, gamma_obj, A_graph, mu, mu_graph, eps=eps)
+            Z_D = np.log(np.maximum(D, eps)) - step_size * G_D
+            Z_D -= np.max(Z_D, axis=0, keepdims=True)  # stability
+            D_candidate = np.exp(Z_D)
+            norms = np.linalg.norm(D_candidate, axis=0, keepdims=True)
+            D_candidate /= np.maximum(norms, eps)
+            W_candidate = D_candidate * D_candidate
 
         rel_change = np.linalg.norm(W_candidate - W) / max(np.linalg.norm(W), 1e-12)
         W = W_candidate
-        # current_obj = candidate_obj
 
         if verbose and (it % 25 == 0 or it == max_iter - 1):
-            print(
-                # f"[W-MD-full] iter={it:4d}, obj={current_obj:.8e}, "
-                f"step={step_size:.3e}, rel_change={rel_change:.3e}"
-            )
+            print(f"step={step_size:.3e}, rel_change={rel_change:.3e}")
 
         if rel_change < tol:
             break
@@ -567,19 +595,10 @@ def update_W_frank_wolfe(
     alpha is chosen by grid line search on the full objective.
     """
     rng = np.random.default_rng(seed)
-
-    # W = np.asarray(W_init, dtype=float).copy()
-    # A = np.asarray(A, dtype=float)
-    # X = np.asarray(X, dtype=float)
     W = W_init
 
     k, n = W.shape
     B = A @ A.T
-
-    # Vectorized initial projection
-    # W = project_columns_to_simplex(W)
-
-    # current_obj = objective_W_original(W, A, X, gamma_obj)
 
     for epoch in range(max_epochs):
         # W_old = W.copy()
@@ -601,138 +620,10 @@ def update_W_frank_wolfe(
             alpha = 2 / (epoch + 2)  # step size for FW, can also do line search here
             direction = s_v - old_col
 
-            # # Vectorized grid line search on alpha in [0,1]
-            # alphas = np.linspace(0.0, 1.0, line_search_grid)
-            # objs = np.zeros(line_search_grid)
-
-            # for i, alpha in enumerate(alphas):
-            #     W[:, v] = old_col + alpha * direction
-            #     objs[i] = objective_W_original(W, A, X, gamma_obj)
-
-            # best_idx = np.argmin(objs)
-            # best_alpha = float(alphas[best_idx])
-            # best_obj = float(objs[best_idx])
             new_col = old_col + alpha * direction
             W[:, v] = new_col
-            # current_obj = best_obj
-
-        # rel_change = np.linalg.norm(W - W_old) / max(np.linalg.norm(W_old), 1e-12)
-
-        # if verbose and (epoch % 5 == 0 or epoch == max_epochs - 1):
-        #     print(
-        #         f"[FW]  epoch={epoch:4d}, obj={current_obj:.8e}, rel_change={rel_change:.3e}"
-        #     )
-
-        # if rel_change < tol:
-        #     break
 
     return W
-
-
-# def update_W_frank_wolfe(
-#     W_init: np.ndarray,
-#     A: np.ndarray,
-#     X: np.ndarray,
-#     gamma_obj: float,
-#     max_epochs: int = 50,
-#     tol: float = 1e-6,
-#     eps: float = 1e-12,
-#     line_search_grid: int = 21,
-#     randomized: bool = False,
-#     seed: int | None = None,
-#     verbose: bool = False,
-# ) -> np.ndarray:
-#     """
-#     Frank-Wolfe updating one simplex column at a time.
-
-#     For column v:
-#       s_v = e_j where j = argmin_i g_i
-#       direction d = s_v - w_v
-#       w_v <- (1-alpha) w_v + alpha s_v
-
-#     alpha is chosen by grid line search on the full objective.
-#     """
-#     rng = np.random.default_rng(seed)
-
-#     W = np.asarray(W_init, dtype=float).copy()
-#     A = np.asarray(A, dtype=float)
-#     X = np.asarray(X, dtype=float)
-
-#     k, n = W.shape
-#     B = A @ A.T
-
-#     # Vectorized initial projection
-#     W = project_columns_to_simplex(W)
-
-#     current_obj = objective_W_original(W, A, X, gamma_obj)
-
-#     for epoch in range(max_epochs):
-#         W_old = W.copy()
-
-#         order = np.arange(n)
-#         if randomized:
-#             rng.shuffle(order)
-
-#         for v in order:
-#             g_v = compute_single_column_subgradient_original(
-#                 W=W, A=A, X=X, gamma_obj=gamma_obj, v=v, B=B, eps=eps
-#             )
-
-#             j = int(np.argmin(g_v))
-#             s_v = np.zeros(k, dtype=float)
-#             s_v[j] = 1.0
-
-#             old_col = W[:, v].copy()
-#             direction = s_v - old_col
-
-#             # Vectorized grid line search on alpha in [0,1]
-#             alphas = np.linspace(0.0, 1.0, line_search_grid)
-#             objs = np.zeros(line_search_grid)
-
-#             for i, alpha in enumerate(alphas):
-#                 W[:, v] = old_col + alpha * direction
-#                 objs[i] = objective_W_original(W, A, X, gamma_obj)
-
-#             best_idx = np.argmin(objs)
-#             best_alpha = float(alphas[best_idx])
-#             best_obj = float(objs[best_idx])
-
-#             W[:, v] = old_col + best_alpha * direction
-#             current_obj = best_obj
-
-#         rel_change = np.linalg.norm(W - W_old) / max(np.linalg.norm(W_old), 1e-12)
-
-#         if verbose and (epoch % 5 == 0 or epoch == max_epochs - 1):
-#             print(
-#                 f"[FW]  epoch={epoch:4d}, obj={current_obj:.8e}, rel_change={rel_change:.3e}"
-#             )
-
-#         if rel_change < tol:
-#             break
-
-#     return W
-
-
-# ============================================================
-# 5) D-reparameterization  (for the coupled graph+feature objective)
-#
-#   D_iv = sqrt(W_iv),  constraint: ||d_v||_2 = 1, D >= 0
-#   L = D^T D  is the Laplacian used in the graph term.
-#
-#   Gradient w.r.t. D (singularity-free):
-#     graph:   4 * mu_graph * D @ (D^T D - A_graph)
-#     clust:   2 * mu * max(D, d_floor) * nabla_W_clust
-#
-#   The graph gradient is a matrix product (D @ R), so it does NOT
-#   vanish for small D entries.  The clustering gradient has an
-#   element-wise D factor (chain rule: dW/dD = 2D).  A floor on D
-#   in that factor prevents dead entries when mu_graph = 0.
-#
-#   Projection: clamp negatives to 0, normalise to unit norm.
-#   Returns W = D^2.
-# ============================================================
-
-_D_FLOOR = 1e-2  # floor for the chain-rule factor in clustering gradient
 
 
 def compute_D_gradient(
@@ -762,6 +653,7 @@ def compute_D_gradient(
             gamma_obj=gamma_obj,
             eps=eps,
         )
+        # G = mu * compute_W_subgradient_original_fast(W, A, X, B, AX, gamma_obj, eps=eps)
         # D_safe = np.maximum(D, _D_FLOOR)
         # D_safe = D
         G_D += 2.0 * mu * D * G_W_clust
@@ -1067,7 +959,10 @@ def update_W(
             max_iter=max_iter,
             tol=tol,
             eps=eps,
-            verbose=verbose,
+            # verbose=verbose,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
             **kwargs,
         )
 
@@ -1084,6 +979,9 @@ def update_W(
             randomized=randomized,
             seed=seed,
             verbose=verbose,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
             **kwargs,
         )
 
@@ -1112,9 +1010,10 @@ def update_W(
             max_iter=max_iter,
             tol=tol,
             eps=eps,
-            # randomized=randomized,
-            # seed=seed,
             verbose=verbose,
+            A_graph=A_graph,
+            mu=mu,
+            mu_graph=mu_graph,
             **kwargs,
         )
 

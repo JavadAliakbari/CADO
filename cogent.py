@@ -881,19 +881,19 @@ def cogent_structured_atoms_with_W(
 # ============================================================
 
 if __name__ == "__main__":
-    seed = 0
+    seed = 1
     np.random.seed(seed)
 
     d = 2
     ell = 1.0
     K_true = 3
     n_per_cluster = 100
-    sigma = 0.1
+    sigma = 0.2
     n = K_true * n_per_cluster
-    gamma_val = 0.75 / n_per_cluster
+    gamma_val = 0.6 / n_per_cluster
     mu_feature = 1.0
     # mu_feature = 0.0
-    mu_graph = 1.0 / n
+    mu_graph = 1.0 / n_per_cluster
     # mu_graph = 0.0
 
     radii = [1.5, 1.7, 2.0]
@@ -947,8 +947,8 @@ if __name__ == "__main__":
     print(np.array2string(result["empirical_means"], precision=4, suppress_small=True))
     print("Fit value:", result["fit_value"])
     print("Fusion value:", result["fusion_value"])
-    print("Optimal objective:", result["objective_value"])
-    print("Objective recomputed from W,A:", obj_check)
+    print("Optimal objective:", obj_check)
+    # print("Objective recomputed from W,A:", obj_check)
 
     plot_data(X, labels, centroids, ell)
 
@@ -956,13 +956,13 @@ if __name__ == "__main__":
         X=X,
         gamma_obj=gamma_val,
         ell=ell,
-        max_iters=15,
+        max_iters=25,
         init_with_one_atom=False,
         inner_alt_cycles=1,
         pg_max_iter=10,
-        w_step_size=1,
+        w_step_size=5,
         A_step_size=1e-3,
-        pg_tol=1e-5,
+        pg_tol=1e-7,
         verbose=True,
         truncation=True,  # set to True to enable backward truncation
         seed=seed,
@@ -971,11 +971,12 @@ if __name__ == "__main__":
         mu_graph=mu_graph,
         w_method="fmd",
         eta=0.5,  # truncation threshold parameter (1.0 = only accept if obj does not increase)
-        fwd_alt_iters=10,
+        fwd_alt_iters=20,
     )
 
     print("\nFinal number of atoms:", res["A_atoms"].shape[0])
     print("Final objective:", res["obj_hist"][-1] if res["obj_hist"].size else None)
+    print("Optimal objective:", obj_check)
     print("Final lambdas:")
     print(np.array2string(res["lam"], precision=4, suppress_small=True))
     print("Final atoms A:")
