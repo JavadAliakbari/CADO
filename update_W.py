@@ -1,6 +1,5 @@
 import numpy as np
 
-
 # ============================================================
 # Simplex projection
 # ============================================================
@@ -89,16 +88,26 @@ def objective_W_original(
     gamma_obj: float,
 ) -> float:
     """
-    Original W-subproblem objective (vectorized):
+    Eq.(15) W-subproblem objective (weighted k-means formulation):
 
-        ||X - W^T A||_F^2 + gamma * sum_{u<v} ||A^T(w_u - w_v)||_2
+        (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
+        + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
 
     W: (k, n)
     A: (k, d)
     X: (n, d)
     """
-    M = build_M_from_W(W, A)
-    fit = np.sum((X - M) ** 2)
+    A = np.asarray(A, dtype=float)
+    W = np.asarray(W, dtype=float)
+    X = np.asarray(X, dtype=float)
+
+    # D[i,v] = ||x_v - a_i||^2
+    D = (
+        np.sum(A**2, axis=1, keepdims=True)  # (k, 1)
+        - 2.0 * (A @ X.T)  # (k, n)
+        + np.sum(X**2, axis=1)[np.newaxis, :]  # (1, n)
+    )
+    fit = 0.5 * float(np.sum(W * D))
 
     # Vectorized fusion term computation
     # Compute all pairwise differences using upper triangle indices
@@ -125,17 +134,25 @@ def compute_W_subgradient_original_fast(
     eps: float = 1e-12,
 ) -> np.ndarray:
     """
-    Vectorized subgradient wrt W for the original objective.
+    Vectorized subgradient wrt W for the eq.(15) objective.
+
+    Fit gradient:  (1/2) * D  where D[i,v] = ||x_v - a_i||^2.
+    SON gradient:  gamma_obj * A @ G_SON^T  (unchanged by chain rule).
 
     W: (k, n), A: (k, d), X: (n, d)
     """
     k, n = W.shape
-    B = A @ A.T
 
-    # Smooth part
-    G = 2.0 * (B @ W - A @ X.T)
+    # Fit part: (1/2) D[i,v] = (1/2)||x_v - a_i||^2
+    D = (
+        np.sum(A**2, axis=1, keepdims=True)  # (k, 1)
+        - 2.0 * (A @ X.T)  # (k, n)
+        + np.sum(X**2, axis=1)[np.newaxis, :]  # (1, n)
+    )
+    G = 0.5 * D  # (k, n)
 
-    # Pair indices
+    # SON part: gamma_obj * A @ G_SON(M)^T  (chain rule, unchanged)
+    B = A @ A.T  # (k, k) — needed for SON pair gradient
     u_idx, v_idx = np.triu_indices(n, k=1)
 
     # DW[:, p] = w_u - w_v
@@ -179,8 +196,9 @@ def compute_single_column_subgradient_original(
     if B is None:
         B = A @ A.T
 
-    # smooth part: 2(B w_v - A x_v)
-    g = 2.0 * (B @ W[:, v] - A @ X[v])
+    # fit gradient for column v: (1/2) * ||x_v - a_i||^2 for each i
+    x_v = X[v]
+    g = 0.5 * (np.sum(A**2, axis=1) - 2.0 * (A @ x_v) + np.dot(x_v, x_v))  # (k,)
 
     k, n = W.shape
     wv = W[:, v]

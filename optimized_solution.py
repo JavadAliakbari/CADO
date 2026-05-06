@@ -76,7 +76,7 @@ def random_sparse_directions(K, d, num_active=2, seed=None):
 def solve_A_hard_assignments_cvxpy(
     X,
     labels,
-    ell,
+    # ell,
     gamma,
     solver=None,
     verbose=False,
@@ -130,7 +130,10 @@ def solve_A_hard_assignments_cvxpy(
     fit_terms = []
     for k in range(K):
         Xk = X[cluster_indices[k], :]  # (n_k, d)
-        fit_terms.append(cp.sum_squares(Xk - cp.reshape(A[k, :], (1, d), order="C")))
+        # Factor of 1/2 matches eq.(15): (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
+        fit_terms.append(
+            0.5 * cp.sum_squares(Xk - cp.reshape(A[k, :], (1, d), order="C"))
+        )
 
     fusion_terms = []
     for k in range(K):
@@ -138,10 +141,10 @@ def solve_A_hard_assignments_cvxpy(
             weight_kl = cluster_sizes[k] * cluster_sizes[l]
             fusion_terms.append(weight_kl * cp.norm(A[k, :] - A[l, :], 2))
 
-    constraints = [cp.norm(A[k, :], 2) <= ell for k in range(K)]
+    # constraints = [cp.norm(A[k, :], 2) <= ell for k in range(K)]
 
     objective = cp.Minimize(cp.sum(fit_terms) + gamma * cp.sum(fusion_terms))
-    problem = cp.Problem(objective, constraints)
+    problem = cp.Problem(objective)
 
     if solver is None:
         problem.solve(verbose=verbose)
@@ -152,12 +155,12 @@ def solve_A_hard_assignments_cvxpy(
     if A_opt is None:
         raise RuntimeError(f"Solver failed. Status: {problem.status}")
 
-    # Compute values again in numpy
+    # Compute values again in numpy — (1/2)*fit to match eq.(15)
     fit_value = 0.0
     for k in range(K):
         Xk = X[cluster_indices[k], :]
         diff = Xk - A_opt[k][None, :]
-        fit_value += float(np.sum(diff**2))
+        fit_value += 0.5 * float(np.sum(diff**2))
 
     fusion_value = 0.0
     for k in range(K):
@@ -198,12 +201,19 @@ def build_W_from_labels(labels, K=None):
 
 def objective_from_WA(X, W, A, gamma):
     """
-    Original objective using M = W^T A:
-        ||X - W^T A||_F^2 + gamma * sum_{u<v} ||mu_u - mu_v||
+    Eq.(15) objective:
+        (1/2) sum_{i,v} W_iv ||x_v - a_i||^2 + gamma * sum_{u<v} ||M_u - M_v||
     """
-    M = W.T @ A
-    fit = float(np.sum((X - M) ** 2))
+    W = np.asarray(W, dtype=float)
+    A = np.asarray(A, dtype=float)
+    D = (
+        np.sum(A**2, axis=1, keepdims=True)
+        - 2.0 * (A @ X.T)
+        + np.sum(X**2, axis=1)[np.newaxis, :]
+    )
+    fit = 0.5 * float(np.sum(W * D))
 
+    M = W.T @ A
     n = X.shape[0]
     fusion = 0.0
     for u in range(n):

@@ -8,7 +8,7 @@ from optimized_solution import (
 )
 
 # from update_A import update_A_projected_gradient_original
-from update_A import update_A
+from update_A import update_A, canonicalize_atoms
 
 # from update_W import update_W_projected_gradient_original
 from update_W import update_W
@@ -31,7 +31,6 @@ def alternating_WA_refinement(
     A: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     num_cycles: int = 1,
     step_size: float = 1e-2,
     max_iter: int = 100,
@@ -54,12 +53,10 @@ def alternating_WA_refinement(
         Data matrix.
     gamma_obj : float
         Regularization parameter.
-    ell : float
-        Radius of l2-ball constraint for rows of A.
     num_cycles : int
         Number of alternating W/A update cycles.
     step_size : float
-        Step size for optimization.
+        Step size for the W update (projected gradient).
     max_iter : int
         Max iterations per update.
     tol : float
@@ -69,7 +66,7 @@ def alternating_WA_refinement(
     w_method : str
         Method for W update ("fw", "bcd", "pg", "md").
     a_method : str
-        Method for A update ("fista", "bcd", "pg", "qn").
+        Method for A update ("fista", "cf", "bcd", "pg", "qn").
     verbose : bool
         Print progress.
 
@@ -94,14 +91,18 @@ def alternating_WA_refinement(
             verbose=verbose,
         )
 
+        # Use a conservative step for A: 1 / lambda_max gives cheap FISTA
+        # iterations (accepted on first backtracking try) while remaining safe.
+        lam_max = float(W.sum(axis=1).max()) if W.size else 1.0
+        a_step = 1.0 / max(lam_max, 1.0)
+
         A = update_A(
             A_init=A,
             W=W,
             X=X,
             gamma_obj=gamma_obj,
-            ell=ell,
             method=a_method,
-            step_size=step_size,
+            step_size=a_step,
             max_iter=max_iter,
             tol=tol,
             eps=eps,
@@ -160,7 +161,6 @@ def truncation_backward_W(
     obj_prev: float,
     obj_post: float,
     eta: float = 0.5,
-    ell: float | None = None,
     trunc_refine_cycles: int = 2,
     pg_max_iter: int = 100,
     pg_step_size: float = 1e-2,
@@ -198,9 +198,7 @@ def truncation_backward_W(
         Objective after forward/enhancement step, i.e. f(x~_{t+1}).
     eta : float
         Threshold parameter in (0, 1]. Paper uses
-            F = eta f(x_t) + (1-eta) f(x~_{t+1}).  [oai_citation:1‡1404.5692v2.pdf](sediment://file_00000000770c71f4b24f29bc2cb940ba)
-    ell : float | None
-        Radius of l2-ball for rows of A. Required if trunc_refine_cycles > 0.
+            F = eta f(x_t) + (1-eta) f(x~_{t+1}).
     trunc_refine_cycles : int
         Number of alternating refinement cycles after removing a candidate atom.
         Set to 0 to skip refinement.
@@ -238,8 +236,7 @@ def truncation_backward_W(
     n, d = X.shape
     threshold = float(eta * obj_prev + (1.0 - eta) * obj_post)
 
-    M_cur = build_M_from_W(W_cur, A_cur, n, d)
-    obj_cur = objective_full(X, M_cur, gamma_obj)
+    obj_cur = objective_full(X, W_cur, A_cur, gamma_obj)
 
     removed_log = []
 
@@ -262,17 +259,11 @@ def truncation_backward_W(
 
             # 2) Optional small refinement after removal
             if trunc_refine_cycles > 0:
-                if ell is None:
-                    raise ValueError(
-                        "ell must be provided when trunc_refine_cycles > 0."
-                    )
-
                 W_try, A_try = alternating_WA_refinement(
                     W=W_try,
                     A=A_try,
                     X=X,
                     gamma_obj=gamma_obj,
-                    ell=ell,
                     num_cycles=trunc_refine_cycles,
                     step_size=pg_step_size,
                     max_iter=pg_max_iter,
@@ -282,8 +273,7 @@ def truncation_backward_W(
                 )
 
             # 3) Evaluate true objective after removal
-            M_try = build_M_from_W(W_try, A_try, n, d)
-            obj_try = objective_full(X, M_try, gamma_obj)
+            obj_try = objective_full(X, W_try, A_try, gamma_obj)
 
             if obj_try < best_obj:
                 best_obj = float(obj_try)
@@ -384,17 +374,122 @@ def son_subgrad_all_pairs(M: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return G
 
 
-def objective_full(X: np.ndarray, M: np.ndarray, gamma: float) -> float:
-    data = float(np.sum((X - M) ** 2))
+def _update_A_hard_clusters(
+    X: np.ndarray,
+    hard_labels: np.ndarray,
+    gamma: float,
+    max_iter: int = 500,
+    tol: float = 1e-10,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    Solve for optimal A given hard (0/1) cluster assignments.
+
+    With hard W the objective collapses to a k-atom problem with only
+    k*(k-1)/2 pairs (instead of n*(n-1)/2), making this very fast.
+
+        min_A  (1/2) sum_k n_k ||a_k - xbar_k||^2
+               + gamma * sum_{k<l} n_k*n_l * ||a_k - a_l||
+
+    Uses FISTA with backtracking.
+    """
+    K = int(hard_labels.max()) + 1
+    n, d = X.shape
+
+    cluster_sizes = np.array([np.sum(hard_labels == k) for k in range(K)], dtype=float)
+    cluster_means = np.vstack([X[hard_labels == k].mean(axis=0) for k in range(K)])
+
+    # Cluster-level pair indices  (only K*(K-1)/2 pairs)
+    ku_idx, kv_idx = np.triu_indices(K, k=1)  # (P,) each, P = K*(K-1)/2
+    weights = cluster_sizes[ku_idx] * cluster_sizes[kv_idx]  # (P,)
+
+    def _grad_and_obj(A):
+        # Fit gradient: diag(n_k) A - diag(n_k) xbar  =>  n_k*(a_k - xbar_k)
+        G = cluster_sizes[:, None] * (A - cluster_means)  # (K, d)
+        fit = 0.5 * float(np.sum(cluster_sizes[:, None] * (A - cluster_means) ** 2))
+
+        # SON between cluster representatives, weighted by n_k * n_l
+        Z = A[ku_idx] - A[kv_idx]  # (P, d)
+        norms = np.linalg.norm(Z, axis=1)  # (P,)
+        fused = float(np.dot(weights, norms))
+
+        U = np.zeros_like(Z)
+        mask = norms > eps
+        U[mask] = Z[mask] / norms[mask, None]
+
+        # Gradient contribution from each pair to row k
+        for p in range(len(ku_idx)):
+            G[ku_idx[p]] += gamma * weights[p] * U[p]
+            G[kv_idx[p]] -= gamma * weights[p] * U[p]
+
+        return G, fit + gamma * fused
+
+    # FISTA
+    A = cluster_means.copy()
+    Y = A.copy()
+    t = 1.0
+    _, obj = _grad_and_obj(A)
+
+    step = 1.0 / float(np.max(cluster_sizes))  # safe Lipschitz init
+
+    for _ in range(max_iter):
+        G, _ = _grad_and_obj(Y)
+
+        # backtracking line search
+        while True:
+            A_cand = Y - step * G
+            _, obj_cand = _grad_and_obj(A_cand)
+            if obj_cand <= obj:
+                break
+            step *= 0.5
+            if step < 1e-20:
+                break
+
+        t_new = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * t * t))
+        Y_new = A_cand + ((t - 1.0) / t_new) * (A_cand - A)
+        # objective restart
+        _, obj_y = _grad_and_obj(Y_new)
+        if obj_y > obj_cand:
+            t_new, Y_new = 1.0, A_cand.copy()
+
+        rel = np.linalg.norm(A_cand - A) / max(np.linalg.norm(A), 1e-12)
+        A, Y, t, obj = A_cand, Y_new, t_new, obj_cand
+        if rel < tol:
+            break
+
+    return A
+
+
+def objective_full(X: np.ndarray, W: np.ndarray, A: np.ndarray, gamma: float) -> float:
+    """
+    Eq.(15) full objective (weighted k-means + SON):
+
+        (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
+        + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
+    """
+    D = (
+        np.sum(A**2, axis=1, keepdims=True)  # (k, 1)
+        - 2.0 * (A @ X.T)  # (k, n)
+        + np.sum(X**2, axis=1)[np.newaxis, :]  # (1, n)
+    )
+    fit = 0.5 * float(np.sum(W * D))
+    M = W.T @ A
     son = son_value_all_pairs(M)
-    return data + gamma * son
+    return fit + gamma * son
 
 
 def q_rows_full(
     X: np.ndarray, M: np.ndarray, gamma: float, eps: float = 1e-12
 ) -> np.ndarray:
+    """
+    Per-node gradient used for forward-atom selection.
+
+    grad_theta_v = (theta_v - x_v) + gamma * G_SON_v
+
+    Corresponds to grad of (1/2)||x_v - theta_v||^2 + gamma*SON(M).
+    """
     G_son = son_subgrad_all_pairs(M, eps=eps)
-    return 2.0 * (M - X) + gamma * G_son
+    return (M - X) + gamma * G_son
 
 
 # ============================================================
@@ -406,15 +501,10 @@ def q_rows_full(
 # ============================================================
 
 
-def forward_atom_from_Q(Q: np.ndarray, ell: float, eps: float = 1e-12):
+def forward_atom_from_Q(Q: np.ndarray, X: np.ndarray, eps: float = 1e-12):
     norms = np.linalg.norm(Q, axis=1)
     v_star = int(np.argmax(norms))
-    qv = Q[v_star]
-    nq = float(np.linalg.norm(qv))
-    if nq < eps:
-        a_new = np.zeros(Q.shape[1], dtype=float)
-    else:
-        a_new = -ell * (qv / nq)
+    a_new = X[v_star].copy()
     return a_new, v_star
 
 
@@ -433,12 +523,11 @@ def augment_W_with_rho(W: np.ndarray, rho: float, n: int) -> np.ndarray:
 def cogent_structured_atoms_with_W(
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     max_iters: int = 15,
     init_with_one_atom: bool = True,
     rho_grid_size: int = 21,
     inner_alt_cycles: int = 5,
-    pg_max_iter: int = 300,
+    pg_max_iter: int = 30,
     pg_step_size: float = 1e-2,
     pg_tol: float = 1e-6,
     eps: float = 1e-12,
@@ -447,15 +536,16 @@ def cogent_structured_atoms_with_W(
     seed: int | None = None,
 ) -> dict:
     """
-    New version:
+    CoGEnT with quadratic (unconstrained) node loss.
 
-    1) Find a_new from the forward step.
+    1) Find a_new from the forward step (initialized at the data point
+       with the largest gradient norm).
     2) Find rho_opt and initialize
            W <- [ (1-rho_opt) W ;
                   rho_opt * 1_n^T ].
     3) Append a_new to A.
     4) Update W using projected gradient.
-    5) Update A using MM closed form.
+    5) Update A using unconstrained gradient descent.
     """
     if seed is not None:
         np.random.seed(seed)
@@ -467,7 +557,7 @@ def cogent_structured_atoms_with_W(
     A_atoms = np.zeros((0, d), dtype=float)
 
     if init_with_one_atom:
-        a0 = project_to_l2_ball(np.mean(X, axis=0), ell, eps=eps)
+        a0 = np.mean(X, axis=0)
         W = np.ones((1, n), dtype=float)
         A_atoms = a0.reshape(1, d)
 
@@ -476,12 +566,16 @@ def cogent_structured_atoms_with_W(
 
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_prev = objective_full(X, M, gamma_obj)
+        obj_prev = objective_full(X, W, A_atoms, gamma_obj)
 
         Q = q_rows_full(X, M, gamma_obj, eps=eps)
-        a_new, v_star = forward_atom_from_Q(Q, ell=ell, eps=eps)
+        a_new, v_star = forward_atom_from_Q(Q, X=X, eps=eps)
 
-        rho_opt = 0
+        # Give the new atom an equal initial share so weight can grow.
+        # With the weighted-kmeans gradient >= 0, rho=0 traps the new atom
+        # at zero weight forever.  rho = 1/(k+1) is the uniform distribution.
+        k_cur = W.shape[0]
+        rho_opt = 1.0 / (k_cur + 1)
 
         W = augment_W_with_rho(W, rho_opt, n)
         A_atoms = (
@@ -498,7 +592,6 @@ def cogent_structured_atoms_with_W(
                 A=A_atoms,
                 X=X,
                 gamma_obj=gamma_obj,
-                ell=ell,
                 num_cycles=1,
                 step_size=pg_step_size,
                 max_iter=pg_max_iter,
@@ -508,7 +601,7 @@ def cogent_structured_atoms_with_W(
             )
 
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_post = objective_full(X, M, gamma_obj)
+        obj_post = objective_full(X, W, A_atoms, gamma_obj)
 
         lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
 
@@ -521,9 +614,8 @@ def cogent_structured_atoms_with_W(
                 gamma_obj=gamma_obj,
                 obj_prev=obj_prev,
                 obj_post=obj_post,
-                eta=0.5,  # same role as in the paper threshold
-                ell=ell,
-                trunc_refine_cycles=inner_alt_cycles,  # or 0 if you want faster truncation
+                eta=0.5,
+                trunc_refine_cycles=inner_alt_cycles,
                 pg_max_iter=pg_max_iter,
                 pg_step_size=1e-2,
                 pg_tol=1e-6,
@@ -556,6 +648,22 @@ def cogent_structured_atoms_with_W(
     M_final = build_M_from_W(W, A_atoms, n, d)
     lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
 
+    # Post-processing: derive interpretable atom positions.
+    #
+    # The objective only depends on M = W^T A (the predictions).  Many
+    # different (W, A) pairs achieve the same M, so atoms found by the
+    # soft alternating updates are not necessarily at meaningful positions.
+    #
+    # Strategy:
+    #   1. Assign each node to its highest-weight atom ("hardening" W).
+    #   2. Solve for the optimal A under those hard assignments using the
+    #      closed-form Newton iteration.  This gives atoms at the biased
+    #      class-centroid positions pulled by the SON fusion term — the
+    #      same interpretable positions produced by the CVX reference.
+    # if A_atoms.size > 0 and W.size > 0:
+    #     hard_labels = W.argmax(axis=0)  # (n,)
+    #     A_atoms = _update_A_hard_clusters(X, hard_labels, gamma_obj)
+
     return {
         "M": M_final,
         "W": W,  # shape (k, n)
@@ -577,11 +685,11 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     d = 2
-    ell = 1.0
+    ell = 1000.0  # large ball radius for the CVX reference solver (effectively unconstrained)
     K_true = 3
     n_per_cluster = 100
-    sigma = 0.10
-    gamma_val = 0.75 / n_per_cluster
+    sigma = 0.3
+    gamma_val = 0.5 / n_per_cluster
 
     radii = [1.5, 1.7, 2.0]
     directions = random_sparse_directions(K_true, d, num_active=1, seed=seed)
@@ -596,13 +704,14 @@ if __name__ == "__main__":
         normalize_data=False,
         seed=seed,
     )
+    # plot_data(X, labels, centroids)
 
     result = solve_A_hard_assignments_cvxpy(
         X=X,
         labels=labels,
-        ell=ell,
+        # ell=ell,
         gamma=gamma_val,
-        solver=None,  # you can set "ECOS", "SCS", or "CLARABEL"
+        solver=None,
         verbose=False,
     )
 
@@ -614,28 +723,25 @@ if __name__ == "__main__":
     print("Cluster sizes:", result["cluster_sizes"])
     print("Optimal A:")
     print(np.array2string(A_opt, precision=4, suppress_small=True))
-    print("Empirical means (gamma=0 solution before ball projection):")
+    print("Empirical means (gamma=0 solution):")
     print(np.array2string(result["empirical_means"], precision=4, suppress_small=True))
     print("Fit value:", result["fit_value"])
     print("Fusion value:", result["fusion_value"])
     print("Optimal objective:", result["objective_value"])
     print("Objective recomputed from W,A:", obj_check)
 
-    plot_data(X, labels, centroids, ell)
-
     res = cogent_structured_atoms_with_W(
         X=X,
         gamma_obj=gamma_val,
-        ell=ell,
         max_iters=10,
         init_with_one_atom=False,
         rho_grid_size=21,
-        inner_alt_cycles=2,
-        pg_max_iter=100,
-        pg_step_size=1e-2,
+        inner_alt_cycles=3,
+        pg_max_iter=10,
+        pg_step_size=5e-2,
         pg_tol=1e-9,
         verbose=True,
-        truncation=True,  # set to True to enable backward truncation
+        truncation=True,
         seed=seed,
     )
 
@@ -646,5 +752,5 @@ if __name__ == "__main__":
     print("Final atoms A:")
     print(np.array2string(res["A_atoms"], precision=4, suppress_small=True))
 
-    plot_solution(X, labels, A_opt, centroids, ell, res, gamma_val)
+    plot_solution(X, labels, A_opt, centroids, res=res, gamma_val=gamma_val)
     plt.show()

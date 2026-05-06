@@ -21,8 +21,8 @@ def generate_clusters_with_directions(
 
     radii = np.asarray(radii, dtype=float).reshape(-1)
     K = radii.shape[0]
-    if np.any(radii <= ell):
-        raise ValueError("Each radius must be strictly larger than ell.")
+    # if np.any(radii <= ell):
+    #     raise ValueError("Each radius must be strictly larger than ell.")
 
     directions = np.asarray(directions, dtype=float)
     if directions.shape != (K, d):
@@ -76,7 +76,7 @@ def random_sparse_directions(K, d, num_active=2, seed=None):
     return directions
 
 
-def plot_data(X, labels, centroids, ell):
+def plot_data(X, labels, centroids, ell=None):
     plt.figure(figsize=(6, 6))
     for k in np.unique(labels):
         idx = labels == k

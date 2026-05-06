@@ -1,6 +1,5 @@
 import numpy as np
 
-
 # ============================================================
 # Row-wise projection onto l2 balls
 # ============================================================
@@ -39,8 +38,9 @@ def objective_A_original(
     gamma_obj: float,
 ) -> float:
     """
-    f(A) = ||X - W^T A||_F^2 + gamma * sum_{u<v} ||A^T(w_u - w_v)||_2
-    (vectorized)
+    f(A) = (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
+           + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
+    (eq. 15 weighted k-means formulation)
 
     A: (k, d)
     W: (k, n)
@@ -50,8 +50,13 @@ def objective_A_original(
     W = np.asarray(W, dtype=float)
     X = np.asarray(X, dtype=float)
 
-    M = W.T @ A
-    fit = float(np.sum((X - M) ** 2))
+    # D[i,v] = ||x_v - a_i||^2 = ||a_i||^2 - 2 a_i.x_v + ||x_v||^2
+    D = (
+        np.sum(A**2, axis=1, keepdims=True)  # (k, 1)
+        - 2.0 * (A @ X.T)  # (k, n)
+        + np.sum(X**2, axis=1)[np.newaxis, :]  # (1, n)
+    )
+    fit = 0.5 * float(np.sum(W * D))
 
     # Vectorized fusion term computation
     _, n = W.shape
@@ -77,7 +82,10 @@ def compute_A_subgradient_original_fast(
     eps: float = 1e-12,
 ) -> np.ndarray:
     """
-    Vectorized subgradient wrt A for the original objective.
+    Vectorized subgradient wrt A for the eq.(15) objective.
+
+    Fit gradient:  diag(lambda) A - W X
+    where lambda_i = sum_v W_iv  (row sums of W).
 
     A: (k, d), W: (k, n), X: (n, d)
     """
@@ -85,7 +93,8 @@ def compute_A_subgradient_original_fast(
     W = np.asarray(W, dtype=float)
     X = np.asarray(X, dtype=float)
 
-    G = 2.0 * (W @ W.T @ A - W @ X)
+    lam = W.sum(axis=1)  # (k,)
+    G = lam[:, np.newaxis] * A - W @ X  # diag(lam) @ A - W @ X
 
     _, n = W.shape
     u_idx, v_idx = np.triu_indices(n, k=1)
@@ -124,13 +133,12 @@ def compute_single_row_subgradient_original(
     k, d = A.shape
     _, n = W.shape
 
-    if WWt is None:
-        WWt = W @ W.T
     if WX is None:
         WX = W @ X
 
-    # smooth part row i
-    g = 2.0 * (WWt[i, :] @ A - WX[i, :])
+    # fit gradient for row i: lambda_i * a_i - (WX)_i
+    lam_i = float(W[i, :].sum())
+    g = lam_i * A[i, :] - WX[i, :]
 
     # Vectorized fusion term subgradient
     # Get all pairs (u, v) with u < v
@@ -169,7 +177,6 @@ def update_A_projected_gradient(
     W: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     step_size: float = 1e-3,
     max_iter: int = 300,
     tol: float = 1e-6,
@@ -180,13 +187,12 @@ def update_A_projected_gradient(
     verbose: bool = False,
 ) -> np.ndarray:
     """
-    Projected subgradient descent for the original A objective.
+    Unconstrained subgradient descent for the A objective (quadratic loss).
     """
     A = np.asarray(A_init, dtype=float).copy()
     W = np.asarray(W, dtype=float)
     X = np.asarray(X, dtype=float)
 
-    A = project_rows_to_l2_ball(A, ell, eps=eps)
     current_obj = objective_A_original(A, W, X, gamma_obj)
 
     for it in range(max_iter):
@@ -196,7 +202,7 @@ def update_A_projected_gradient(
         accepted = False
 
         while True:
-            A_candidate = project_rows_to_l2_ball(A - step * G, ell, eps=eps)
+            A_candidate = A - step * G
             candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
 
             if (not use_backtracking) or (candidate_obj <= current_obj):
@@ -237,7 +243,6 @@ def update_A_block_coordinate_descent(
     W: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     step_size: float = 1e-2,
     max_epochs: int = 50,
     tol: float = 1e-6,
@@ -250,8 +255,8 @@ def update_A_block_coordinate_descent(
     verbose: bool = False,
 ) -> np.ndarray:
     """
-    Row-wise block coordinate descent:
-        a_i <- Proj_{||a||<=ell}(a_i - eta g_i)
+    Row-wise block coordinate descent (unconstrained, quadratic loss):
+        a_i <- a_i - eta g_i
     """
     rng = np.random.default_rng(seed)
 
@@ -260,7 +265,6 @@ def update_A_block_coordinate_descent(
     X = np.asarray(X, dtype=float)
 
     k, _ = A.shape
-    A = project_rows_to_l2_ball(A, ell, eps=eps)
     current_obj = objective_A_original(A, W, X, gamma_obj)
 
     WWt = W @ W.T
@@ -283,7 +287,7 @@ def update_A_block_coordinate_descent(
             old_row = A[i, :].copy()
 
             while True:
-                new_row = project_to_l2_ball(old_row - step * g_i, ell, eps=eps)
+                new_row = old_row - step * g_i
                 A[i, :] = new_row
                 candidate_obj = objective_A_original(A, W, X, gamma_obj)
 
@@ -323,7 +327,6 @@ def update_A_fista(
     W: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     step_size: float = 1e-3,
     max_iter: int = 300,
     tol: float = 1e-6,
@@ -335,11 +338,11 @@ def update_A_fista(
     verbose: bool = False,
 ) -> np.ndarray:
     """
-    FISTA-style projected subgradient method.
+    FISTA-style subgradient method (unconstrained, quadratic loss).
     Works on the original nonsmooth objective, so this is a practical
     accelerated heuristic rather than textbook smooth FISTA.
     """
-    A = project_rows_to_l2_ball(np.asarray(A_init, dtype=float).copy(), ell, eps=eps)
+    A = np.asarray(A_init, dtype=float).copy()
     Y = A.copy()
     t = 1.0
 
@@ -352,7 +355,7 @@ def update_A_fista(
         accepted = False
 
         while True:
-            A_candidate = project_rows_to_l2_ball(Y - step * G, ell, eps=eps)
+            A_candidate = Y - step * G
             candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
 
             if (not use_backtracking) or (candidate_obj <= current_obj):
@@ -373,9 +376,7 @@ def update_A_fista(
 
         if restart:
             # objective-based adaptive restart
-            y_obj = objective_A_original(
-                project_rows_to_l2_ball(Y_new, ell, eps=eps), W, X, gamma_obj
-            )
+            y_obj = objective_A_original(Y_new, W, X, gamma_obj)
             if y_obj > candidate_obj:
                 t_new = 1.0
                 Y_new = A_candidate.copy()
@@ -407,7 +408,6 @@ def update_A_quasi_newton(
     W: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
     step_size: float = 1e-1,
     max_iter: int = 300,
     tol: float = 1e-6,
@@ -418,15 +418,14 @@ def update_A_quasi_newton(
     verbose: bool = False,
 ) -> np.ndarray:
     """
-    Projected diagonal quasi-Newton / AdaGrad-like update.
+    Diagonal quasi-Newton / AdaGrad-like update (unconstrained, quadratic loss).
 
     Uses a diagonal inverse-Hessian approximation:
         H_t^{-1} ~ 1 / sqrt(sum_{s<=t} g_s^2 + eps)
-    then projects rows of A onto l2 balls.
 
     This is not exact BFGS, but it is robust and cheap.
     """
-    A = project_rows_to_l2_ball(np.asarray(A_init, dtype=float).copy(), ell, eps=eps)
+    A = np.asarray(A_init, dtype=float).copy()
     current_obj = objective_A_original(A, W, X, gamma_obj)
 
     G_accum = np.zeros_like(A)
@@ -441,7 +440,7 @@ def update_A_quasi_newton(
         accepted = False
 
         while True:
-            A_candidate = project_rows_to_l2_ball(A - step * scaled_grad, ell, eps=eps)
+            A_candidate = A - step * scaled_grad
             candidate_obj = objective_A_original(A_candidate, W, X, gamma_obj)
 
             if (not use_backtracking) or (candidate_obj <= current_obj):
@@ -473,6 +472,136 @@ def update_A_quasi_newton(
 
 
 # ============================================================
+# 5) Closed-form (Newton / preconditioned) update — quadratic case
+# ============================================================
+
+
+def update_A_closed_form(
+    A_init: np.ndarray,
+    W: np.ndarray,
+    X: np.ndarray,
+    gamma_obj: float,
+    eps: float = 1e-12,
+    max_iter: int = 30,
+    tol: float = 1e-10,
+    verbose: bool = False,
+) -> np.ndarray:
+    """
+    Exact closed-form A update for the eq.(15) weighted k-means objective.
+
+    Setting grad_A = 0 in the new formulation gives a *diagonal* system
+    (one independent equation per atom i):
+
+        lambda_i * a_i = (WX)_i - gamma_obj * (W @ G_SON(M))_i
+
+        a_i^* = [(WX)_i - gamma_obj * (W @ G_SON)_i] / lambda_i
+
+    where lambda_i = sum_v W_iv (row sum of W).
+
+    Since G_SON depends on M = W^T A, we iterate a few steps:
+
+        A^{t+1} = diag(lambda)^{-1} [WX - gamma_obj * W @ G_SON(W^T A^t)]
+
+    Warm start: A_0 = diag(lambda)^{-1} WX  (pure weighted centroids).
+
+    Parameters
+    ----------
+    A_init    : ignored (warm start from centroids is always better)
+    W         : (k, n) ndarray
+    X         : (n, d) ndarray
+    gamma_obj : float
+    eps       : float  — floor on lambda_i to avoid division by zero
+    max_iter, tol, verbose : convergence controls
+    """
+    W = np.asarray(W, dtype=float)
+    X = np.asarray(X, dtype=float)
+
+    lam = W.sum(axis=1)  # (k,)
+    lam_safe = np.maximum(lam, eps)[:, np.newaxis]  # (k, 1)
+    WX = W @ X  # (k, d)
+
+    # Warm start: pure weighted centroids (ignores SON)
+    A = WX / lam_safe  # (k, d)
+
+    # Precompute pair indices and DW (unchanged across iterations)
+    _, n = W.shape
+    u_idx, v_idx = np.triu_indices(n, k=1)
+    DW = W[:, u_idx] - W[:, v_idx]  # (k, P)
+
+    for it in range(max_iter):
+        # SON subgradient in prediction space: G_SON w.r.t. M = W^T A
+        M = W.T @ A  # (n, d)
+        Z = A.T @ DW  # (d, P)
+        norms = np.linalg.norm(Z, axis=0)  # (P,)
+        U = np.zeros_like(Z)
+        mask = norms > 1e-12
+        U[:, mask] = Z[:, mask] / norms[mask]
+        # W @ G_SON(M) via chain rule: W @ (DW^T @ U)^T ... = DW @ U^T
+        son_correction = DW @ U.T  # (k, d)
+
+        rhs = WX - gamma_obj * son_correction  # (k, d)
+        A_new = rhs / lam_safe  # (k, d)
+
+        rel_change = np.linalg.norm(A_new - A) / max(np.linalg.norm(A), 1e-12)
+        A = A_new
+
+        if verbose and it % 5 == 0:
+            obj = objective_A_original(A, W, X, gamma_obj)
+            print(f"[A-CF] iter={it:3d}, obj={obj:.6e}, rel_change={rel_change:.3e}")
+
+        if rel_change < tol:
+            break
+
+    return A
+
+
+# ============================================================
+# Canonical-projection utility
+# ============================================================
+
+
+def canonicalize_atoms(
+    A: np.ndarray,
+    W: np.ndarray,
+    eps: float = 1e-4,
+) -> np.ndarray:
+    """
+    Project A to its minimum-norm representative.
+
+    The objective f(W, A) only depends on M = W^T A, not on A itself.
+    Many (W, A) pairs achieve the same M, so atoms can drift to arbitrary
+    positions during optimisation.
+
+    This function computes the *canonical* (minimum-norm) A that achieves
+    the same predictions M = W^T A:
+
+        A_canonical = (W W^T + eps_scaled I)^{-1}  W M
+                    = (W W^T + eps_scaled I)^{-1}  W W^T A
+
+    For well-conditioned W (all atoms have substantial weight), this
+    places each atom at the weighted mean of its assigned nodes — the
+    correct class-centroid position.  It does NOT change M (up to the
+    tiny regularisation shift), so the objective is unchanged.
+
+    Parameters
+    ----------
+    A : (k, d) ndarray  — current (possibly degenerate) atoms
+    W : (k, n) ndarray  — assignment matrix
+    eps : float         — relative Tikhonov regularisation
+    """
+    A = np.asarray(A, dtype=float)
+    W = np.asarray(W, dtype=float)
+
+    WWT = W @ W.T
+    eps_scaled = eps * max(float(np.max(np.diag(WWT))), 1.0)
+    WWT_reg = WWT + eps_scaled * np.eye(WWT.shape[0])
+
+    M = W.T @ A  # n x d  — current predictions
+    rhs = W @ M  # k x d  = W W^T A
+    return np.linalg.solve(WWT_reg, rhs)
+
+
+# ============================================================
 # Unified chooser
 # ============================================================
 
@@ -482,8 +611,7 @@ def update_A(
     W: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
-    ell: float,
-    method: str = "bcd",
+    method: str = "cf",
     step_size: float = 1e-2,
     max_iter: int = 50,
     tol: float = 1e-6,
@@ -494,15 +622,30 @@ def update_A(
     **kwargs,
 ) -> np.ndarray:
     """
-    Unified interface for A update methods.
+    Unified interface for A update methods (unconstrained, quadratic loss).
 
     method options:
-      - "pg"    : projected gradient / subgradient
+      - "cf"   : closed-form Newton/preconditioned step (recommended for
+                  unconstrained quadratic loss — gives unique, interpretable
+                  atom positions by solving the linear system exactly)
+      - "pg"    : gradient / subgradient descent
       - "bcd"   : block coordinate descent by rows
-      - "fista" : accelerated projected method
+      - "fista" : accelerated subgradient method
       - "qn"    : diagonal quasi-Newton / AdaGrad-like
     """
     method = method.lower()
+
+    if method in ("cf", "closed_form", "closed-form", "newton"):
+        return update_A_closed_form(
+            A_init=A_init,
+            W=W,
+            X=X,
+            gamma_obj=gamma_obj,
+            eps=eps,
+            max_iter=max_iter,
+            tol=tol,
+            verbose=verbose,
+        )
 
     if method == "pg":
         return update_A_projected_gradient(
@@ -510,7 +653,6 @@ def update_A(
             W=W,
             X=X,
             gamma_obj=gamma_obj,
-            ell=ell,
             step_size=step_size,
             max_iter=max_iter,
             tol=tol,
@@ -525,7 +667,6 @@ def update_A(
             W=W,
             X=X,
             gamma_obj=gamma_obj,
-            ell=ell,
             step_size=step_size,
             max_epochs=max_iter,
             tol=tol,
@@ -542,7 +683,6 @@ def update_A(
             W=W,
             X=X,
             gamma_obj=gamma_obj,
-            ell=ell,
             step_size=step_size,
             max_iter=max_iter,
             tol=tol,
@@ -557,7 +697,6 @@ def update_A(
             W=W,
             X=X,
             gamma_obj=gamma_obj,
-            ell=ell,
             step_size=step_size,
             max_iter=max_iter,
             tol=tol,
@@ -566,7 +705,7 @@ def update_A(
             **kwargs,
         )
 
-    raise ValueError("Unknown method. Use one of: 'pg', 'bcd', 'fista', 'qn'.")
+    raise ValueError("Unknown method. Use one of: 'cf', 'pg', 'bcd', 'fista', 'qn'.")
 
 
 # ============================================================
@@ -588,7 +727,6 @@ if __name__ == "__main__":
     A0 = rng.normal(size=(k, d))
 
     gamma_obj = 0.05
-    ell = 1.0
 
     print("Running A-BCD...")
     A_bcd = update_A(
@@ -596,7 +734,6 @@ if __name__ == "__main__":
         W=W,
         X=X,
         gamma_obj=gamma_obj,
-        ell=ell,
         method="bcd",
         step_size=1e-2,
         max_iter=20,
@@ -612,7 +749,6 @@ if __name__ == "__main__":
         W=W,
         X=X,
         gamma_obj=gamma_obj,
-        ell=ell,
         method="fista",
         step_size=1e-3,
         max_iter=50,
@@ -626,7 +762,6 @@ if __name__ == "__main__":
         W=W,
         X=X,
         gamma_obj=gamma_obj,
-        ell=ell,
         method="qn",
         step_size=1e-1,
         max_iter=50,
@@ -640,7 +775,6 @@ if __name__ == "__main__":
         W=W,
         X=X,
         gamma_obj=gamma_obj,
-        ell=ell,
         method="pg",
         step_size=1e-3,
         max_iter=50,
