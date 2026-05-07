@@ -615,6 +615,7 @@ def cogent_structured_atoms_with_W(
     beta: float = 0.0,
     K_classes: int = 0,
     pi_method: str = "cf",
+    true_labels: np.ndarray | None = None,
 ) -> dict:
     """
     CoGEnT with quadratic (unconstrained) node loss.
@@ -802,14 +803,25 @@ def cogent_structured_atoms_with_W(
                 y_pred_iter = (W.T @ Pi_atoms).argmax(axis=1)
                 train_acc = (y_pred_iter[_train_mask] == _tilde_y[_train_mask]).mean()
                 acc_str = f"train_acc={train_acc:.4f} "
+            cluster_acc_str = ""
+            if true_labels is not None and W.size > 0:
+                from scipy.optimize import linear_sum_assignment
+
+                hard = W.argmax(axis=0)
+                Kp = max(int(hard.max()), int(true_labels.max())) + 1
+                Cm = np.zeros((Kp, Kp), dtype=int)
+                for pi_, ti_ in zip(hard, true_labels):
+                    Cm[pi_, ti_] += 1
+                ri_, ci_ = linear_sum_assignment(-Cm)
+                cluster_acc_str = (
+                    f"cluster_acc={Cm[ri_, ci_].sum() / len(true_labels):.4f} "
+                )
             print(
                 f"iter={t:02d} "
                 f"K={W.shape[0]} "
-                # f"obj_prev={obj_prev:.4f} "
                 f"obj_post={obj_post:.4f} "
                 f"{acc_str}"
-                # f"rho={rho_opt:.4f} "
-                # f"v_star={v_star}"
+                f"{cluster_acc_str}"
             )
 
     M_final = build_M_from_W(W, A_atoms, n, d)
@@ -894,17 +906,39 @@ if __name__ == "__main__":
 
     directions = random_sparse_directions(K_true, d, num_active=num_active, seed=seed)
 
-    X, labels, centroids, _ = generate_clusters_with_directions(
-        d=d,
-        n_per_cluster=n_per_cluster,
-        sigma=sigma,
-        ell=ell,
-        radii=radii,
-        directions=directions,
-        normalize_data=False,
-        seed=seed,
-    )
+    # ── Data: uniform inside ball of radius rho := sigma around each centroid.
+    # Guarantees max_v ||x_v - centroid_k|| == rho exactly (one boundary point
+    # per cluster), and all other points strictly inside.
+    rho = float(sigma)
+    rng_data = np.random.default_rng(seed)
+    norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    dirs = directions / norms
+    radii_arr = np.asarray(radii, dtype=float).reshape(-1)
+    centroids = dirs * radii_arr[:, None]  # (K_true, d)
+
+    X_list = []
+    labels_list = []
+    for k in range(K_true):
+        # Uniform direction on unit sphere * uniform radius in [0, rho]
+        u = rng_data.standard_normal((n_per_cluster, d))
+        u /= np.linalg.norm(u, axis=1, keepdims=True) + 1e-12
+        r = rng_data.uniform(0.0, rho, size=(n_per_cluster, 1))
+        # Force the first point of each cluster to lie exactly on the sphere
+        # so that max distance equals rho exactly.
+        r[0, 0] = rho
+        X_list.append(centroids[k] + u * r)
+        labels_list.extend([k] * n_per_cluster)
+    X = np.vstack(X_list)
+    labels = np.array(labels_list, dtype=int)
     n = len(labels)
+
+    # Sanity: max in-cluster distance should be exactly rho.
+    max_dist = max(
+        float(np.linalg.norm(X[labels == k] - centroids[k], axis=1).max())
+        for k in range(K_true)
+    )
+    print(f"Data: rho={rho},  measured max ||x_v - centroid_k|| = {max_dist:.6f}")
 
     # Derived internal coefficients (shown for reference)
     gamma_obj_val = gamma / n  # SON coefficient
@@ -913,14 +947,30 @@ if __name__ == "__main__":
     print(f"  -> gamma_obj (SON coeff)   = gamma/n      = {gamma_obj_val:.4e}")
     print(f"  -> gamma_graph (graph coeff) = 1/(mu*n) = {gamma_graph_val:.4e}")
 
-    # ── SBM adjacency matrix ──────────────────────────────────────────────
+    # ── SBM adjacency matrix (EXACT counts, not Bernoulli) ────────────────
+    # p_max := p_out is interpreted as the EXACT fraction of cross-cluster
+    # pairs that are connected (rounded to int).  Within-cluster fraction is
+    # exactly (1 - p_out).  Edges within each pool are sampled uniformly
+    # without replacement.
     rng = np.random.default_rng(seed)
     same_block = (labels[:, None] == labels[None, :]).astype(float)
-    probs = same_block * (1 - p) + (1 - same_block) * p
-    upper = rng.random((n, n))
-    upper = (upper < probs).astype(float)
-    A_graph = np.triu(upper, k=1)
+    iu, ju = np.triu_indices(n, k=1)
+    pair_same = labels[iu] == labels[ju]
+    within_idx = np.flatnonzero(pair_same)
+    between_idx = np.flatnonzero(~pair_same)
+    n_within_target = int(round((1.0 - p) * within_idx.size))
+    n_between_target = int(round(p * between_idx.size))
+    chosen_within = rng.choice(within_idx, size=n_within_target, replace=False)
+    chosen_between = rng.choice(between_idx, size=n_between_target, replace=False)
+    A_graph = np.zeros((n, n), dtype=float)
+    A_graph[iu[chosen_within], ju[chosen_within]] = 1.0
+    A_graph[iu[chosen_between], ju[chosen_between]] = 1.0
     A_graph = A_graph + A_graph.T
+    print(
+        f"SBM (exact): within edges={n_within_target}/{within_idx.size}"
+        f"  ({(1.0 - p):.3f}),  between edges={n_between_target}/{between_idx.size}"
+        f"  ({p:.3f})"
+    )
 
     # ── CVX reference (no graph term) ───────────────────────────────────
     result = solve_A_hard_assignments_cvxpy(
@@ -954,6 +1004,7 @@ if __name__ == "__main__":
         verbose=verbose,
         truncation=truncation,
         seed=seed,
+        true_labels=labels,
     )
     obj_base = res_base["obj_hist"][-1] if res_base["obj_hist"].size else float("nan")
     hard_base = res_base["W"].argmax(axis=0)
@@ -975,6 +1026,7 @@ if __name__ == "__main__":
         truncation=truncation,
         seed=seed,
         A_graph=A_graph,
+        true_labels=labels,
     )
     obj_graph = (
         res_graph["obj_hist"][-1] if res_graph["obj_hist"].size else float("nan")

@@ -49,11 +49,11 @@ from cluster_generation import random_sparse_directions
 # ============================================================
 # Experiment parameters  (paper Fig. 3 setup)
 # ============================================================
-K = 5
-D = 6
+K = 3
+D = 2
 # Small graph: we construct adjacency directly so delta_ij = 0 and the
 # realized p_max equals the requested target exactly (no SBM fluctuation).
-N_PER_CLUSTER = 50  # n = 150  (granularity 1/N ≈ 0.033)
+N_PER_CLUSTER = 15  # n = 150  (granularity 1/N ≈ 0.033)
 ELL = 1000.0
 # Centroid geometry: ring of radius R_RING -> d_min = 2 R_RING sin(pi/K).
 # Larger d_min raises the Thm 4.7 upper bound  gamma < m_v * d_min / (2(1-1/K))
@@ -61,11 +61,11 @@ ELL = 1000.0
 # R_RING=5.0, K=5 -> d_min ≈ 5.88, upper bound on gamma ≈ 3.67.
 R_RING = 4.0
 RADII = [R_RING] * K
-GAMMA = 3.0  # well within Thm 4.7 upper bound -> gamma/K = 0.6
+GAMMA = 0.5  # well within Thm 4.7 upper bound -> gamma/K = 0.6
 M_V = 1.0
 
 # Per-cell mu sweep -- one panel per mu, plus best/union summary panels.
-MU_GRID = [0.6, 1.2]
+MU_GRID = [0, 0.2, 0.5]
 
 N_P = 10
 N_RHO = 10
@@ -88,7 +88,7 @@ N_P = len(P_VALS)  # update N_P to match snapped grid
 # by placing all points of a cluster on a sphere of radius rho/2 around the
 # centroid (with one antipodal pair to make the diameter exact).
 # Range spans from below gamma/K = 0.6 up to ~d_min so all four regimes appear.
-d_min_ring = 2.0 * R_RING * np.sin(np.pi / K)
+d_min_ring = 3.0 * R_RING * np.sin(np.pi / K)
 RHO_VALS = np.linspace(0.10, 0.5 * d_min_ring, N_RHO)
 
 # Per-block split between block-average rho_bar and per-node deviation delta:
@@ -99,11 +99,11 @@ RHO_VALS = np.linspace(0.10, 0.5 * d_min_ring, N_RHO)
 ALPHA = 0.6
 
 SOLVER_KW = dict(
-    max_iters=12,
+    max_iters=20,
     init_with_one_atom=False,
     inner_alt_cycles=2,
     pg_max_iter=10,
-    pg_step_size=0.025,
+    pg_step_size=0.05,
     pg_tol=1e-8,
     eps=1e-12,
     truncation=True,
@@ -209,7 +209,13 @@ def make_clusters_fixed_rho(rho, centroids, n_per_cluster, rng):
 
 
 def _add_circulant(A, nodes, deg):
-    """Add a circulant of even degree `deg` among `nodes` (in-place)."""
+    """Add a circulant of degree `deg` among `nodes` (in-place).
+
+    Uses offsets +/-1, +/-2, ..., for the floor(deg/2) closest pairs.
+    If `deg` is odd, requires len(nodes) to be even and additionally adds
+    the antipodal offset N/2 (a perfect matching).  Net degree = `deg`
+    on every node.
+    """
     n = len(nodes)
     if deg <= 0 or n < 2:
         return
@@ -217,6 +223,16 @@ def _add_circulant(A, nodes, deg):
     for off in range(1, half + 1):
         for k in range(n):
             u, v = nodes[k], nodes[(k + off) % n]
+            A[u, v] = A[v, u] = 1.0
+    if deg % 2 == 1:
+        # antipodal matching -- only valid for even n
+        if n % 2 != 0:
+            raise ValueError(
+                f"Cannot build a {deg}-regular circulant on {n} nodes " f"(odd n*deg)."
+            )
+        m = n // 2
+        for k in range(m):
+            u, v = nodes[k], nodes[k + m]
             A[u, v] = A[v, u] = 1.0
 
 
@@ -232,101 +248,60 @@ def _add_bipartite(A, rows, cols, row_deg):
             A[u, v] = A[v, u] = 1.0
 
 
-def _to_even(x, lo, hi):
-    """Clamp `x` to [lo, hi] and round down to nearest even integer."""
-    x = int(max(lo, min(x, hi)))
-    if x % 2 == 1:
-        x -= 1
-    return max(lo, x)
-
-
-def construct_controlled_graph(labels, p_target, alpha):
+def construct_controlled_graph(labels, p_target, alpha=1.0):
     """
     Build a symmetric adjacency `A` so that for every ordered pair of
-    classes (i, j) the paper's quantities (eq. (6)) are *constructed*
-    exactly:
+    classes (i, j), p_{ij} = bar_rho_{ij} + 2 delta_{ij} = p_target,
+    up to a granularity of 1/N (with N = nodes per class).
 
-        rho_bar_ij  =  alpha * p_target          (block-level mis-rate)
-        2 delta_ij  = (1 - alpha) * p_target     (per-node deviation)
-        p_ij        =  rho_bar_ij + 2 delta_ij  =  p_target
+    Construction (delta = 0, fully regular).
+      - Inter (i != j): for every v in C_i, exactly m_inter = round(p*N)
+        edges to C_j (and vice-versa).  Realized via a shifted regular
+        bipartite graph -> n_{v,j} = m_inter for all v -> delta_{ij} = 0.
+      - Intra (i == j): n_bar_{v,i} = N - n_{v,i} (paper eq. 6).  We make
+        the intra graph (intra_deg)-regular with intra_deg = N - 1 -
+        m_intra_missing, where m_intra_missing = max(0, round(p*N) - 1).
+        The "-1" accounts for the unavoidable self-exclusion floor 1/N.
+        bar_rho_{ii} = (N - intra_deg) / N = (1 + m_intra_missing) / N.
+        delta_{ii} = 0 by regularity, so p_{ii} = bar_rho_{ii}.
 
-    Construction.  Split each class C_i into two halves H_i (high
-    present-degree) and L_i (low present-degree) of equal size N/2.
-    Every block (i, j) is built as the union of four regular sub-blocks
-    HH, HL, LH, LL whose degrees are chosen so that:
-      - H-nodes deviate by +delta from the block average;
-      - L-nodes deviate by -delta from the block average;
-      - block sums match rho_bar exactly;
-      - intra-block: missing-edge counts replace edge counts.
+    Feasibility: a (intra_deg)-regular circulant on N nodes exists when
+    N * intra_deg is even.  When N is odd we round intra_deg down to the
+    nearest even integer (granularity becomes 2/N for the diagonal, but
+    the inter blocks remain at 1/N granularity).
 
-    This is feasible up to integer rounding (granularity 1/N).  The
-    function returns the realized A; `empirical_pmax(A, labels)` will
-    equal `p_target` to within rounding.
+    Irreducible floor: p_max >= 1/N (set by the diagonal self-exclusion).
+
+    The `alpha` argument is accepted for API compatibility but ignored;
+    the construction always uses delta = 0.
     """
     classes = np.unique(labels)
     n = len(labels)
     A = np.zeros((n, n), dtype=float)
     idx = {c: np.where(labels == c)[0] for c in classes}
     N = len(idx[classes[0]])
-    halfN = N // 2
 
-    # Per-node integer counts (counts of mis-edges, not fractions).
-    rho_count = int(round(alpha * p_target * N))  # = rho_bar_ij * N
-    delta_count = int(round((1.0 - alpha) * p_target * N / 2.0))  # = delta_ij * N
+    # ---- inter-class: m_inter = round(p*N), in [0, N] -------------------
+    m_inter = int(round(p_target * N))
+    m_inter = max(0, min(m_inter, N))
 
-    # Halves: deterministic split (first half = "high", second = "low").
-    H = {c: idx[c][:halfN] for c in classes}
-    L = {c: idx[c][halfN:] for c in classes}
-
-    # ------------------------------------------------------------------
-    # Intra-class blocks.  Want every v in C_i to have exactly
-    #     n_{v,i} = (N - rho_count) +/- delta_count   present intra edges.
-    # In the H/L decomposition (intra is undirected, d_LH = d_HL):
-    #     H present degree:  d_HH + d_HL = d_p + delta_count
-    #     L present degree:  d_LL + d_HL = d_p - delta_count
-    # so  d_HH - d_LL = 2*delta_count.
-    # Circulant degrees inside H or L must be EVEN and <= halfN - 1.
-    # Pick d_HH as small as feasible so that d_HL = d_p + delta - d_HH
-    # fits in [0, halfN] (the bipartite cap).
-    # ------------------------------------------------------------------
-    d_p = N - rho_count
-    cap_circ = halfN - 1 if (halfN - 1) % 2 == 0 else halfN - 2  # max even
-    # Lower bound on d_HH:  d_HL <= halfN  AND  d_LL >= 0
-    d_HH_min = max(0, 2 * delta_count, d_p + delta_count - halfN)
-    if d_HH_min % 2 == 1:
-        d_HH_min += 1  # round up to even
-    d_HH_intra = min(d_HH_min, cap_circ)
-    d_LL_intra = max(0, d_HH_intra - 2 * delta_count)
-    if d_LL_intra > cap_circ:
-        d_LL_intra = cap_circ
-    d_HL_intra = max(0, min(d_p + delta_count - d_HH_intra, halfN))
+    # ---- intra-class: missing-edges per node = max(0, round(p*N) - 1) ---
+    m_intra_missing = max(0, int(round(p_target * N)) - 1)
+    m_intra_missing = min(m_intra_missing, N - 1)
+    intra_deg = N - 1 - m_intra_missing
+    # Adjust for parity (need N*intra_deg even).
+    if (N * intra_deg) % 2 != 0:
+        intra_deg -= 1  # drop one edge per node (ceil missing to even)
+    intra_deg = max(0, intra_deg)
 
     for c in classes:
-        _add_circulant(A, H[c], d_HH_intra)
-        _add_circulant(A, L[c], d_LL_intra)
-        _add_bipartite(A, H[c], L[c], d_HL_intra)
-
-    # ------------------------------------------------------------------
-    # Inter-class blocks.  4 regular bipartite sub-blocks (HH, HL, LH, LL)
-    # with degrees:
-    #   d_HH + d_HL = rho_count + delta_count    (H-row sum)
-    #   d_LH + d_LL = rho_count - delta_count    (L-row sum)
-    #   d_HH = d_HL + 2*delta? Symmetric d_HL = d_LH and d_HH - d_LL = 2*delta.
-    # Each sub-block degree must lie in [0, halfN].
-    # ------------------------------------------------------------------
-    d_HH_min = max(0, 2 * delta_count, rho_count + delta_count - halfN)
-    d_HH_inter = min(d_HH_min, halfN)
-    d_LL_inter = max(0, d_HH_inter - 2 * delta_count)
-    d_HL_inter = max(0, min(rho_count + delta_count - d_HH_inter, halfN))
+        _add_circulant(A, idx[c], intra_deg)
 
     for ii, ci in enumerate(classes):
         for jj, cj in enumerate(classes):
             if jj <= ii:
                 continue
-            _add_bipartite(A, H[ci], H[cj], d_HH_inter)
-            _add_bipartite(A, L[ci], L[cj], d_LL_inter)
-            _add_bipartite(A, H[ci], L[cj], d_HL_inter)
-            _add_bipartite(A, L[ci], H[cj], d_HL_inter)
+            _add_bipartite(A, idx[ci], idx[cj], m_inter)
 
     np.fill_diagonal(A, 0.0)
     return A
