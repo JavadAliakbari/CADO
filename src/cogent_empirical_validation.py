@@ -53,7 +53,7 @@ K = 3
 D = 2
 # Small graph: we construct adjacency directly so delta_ij = 0 and the
 # realized p_max equals the requested target exactly (no SBM fluctuation).
-N_PER_CLUSTER = 15  # n = 150  (granularity 1/N ≈ 0.033)
+N_PER_CLUSTER = 50  # n = 150  (granularity 1/N ≈ 0.033)
 ELL = 1000.0
 # Centroid geometry: ring of radius R_RING -> d_min = 2 R_RING sin(pi/K).
 # Larger d_min raises the Thm 4.7 upper bound  gamma < m_v * d_min / (2(1-1/K))
@@ -61,15 +61,15 @@ ELL = 1000.0
 # R_RING=5.0, K=5 -> d_min ≈ 5.88, upper bound on gamma ≈ 3.67.
 R_RING = 4.0
 RADII = [R_RING] * K
-GAMMA = 0.5  # well within Thm 4.7 upper bound -> gamma/K = 0.6
+GAMMA = 1  # well within Thm 4.7 upper bound -> gamma/K = 0.6
 M_V = 1.0
 
 # Per-cell mu sweep -- one panel per mu, plus best/union summary panels.
-MU_GRID = [0, 0.2, 0.5]
+MU_GRID = [1.2, 2.2]
 
-N_P = 10
-N_RHO = 10
-N_TRIALS = 5
+N_P = 40
+N_RHO = 25
+N_TRIALS = 20
 
 P_STAR = ((K + 4) - np.sqrt((K + 4) ** 2 - 16)) / 8.0
 GAMMA_K = GAMMA / K  # = 0.6 for K=5, gamma=3
@@ -80,7 +80,7 @@ GAMMA_K = GAMMA / K  # = 0.6 for K=5, gamma=3
 #   p_max > 0.25         : even combined fails (eq. (19))
 # Snap p targets to multiples of 1/N so realized p_max equals target exactly
 # (granularity is 1/N_PER_CLUSTER).
-_p_grid = np.linspace(0.005, 0.25, N_P)
+_p_grid = np.linspace(0.005, 0.4, N_P)
 P_VALS = np.round(_p_grid * N_PER_CLUSTER) / N_PER_CLUSTER
 P_VALS = np.unique(P_VALS[P_VALS > 0])
 N_P = len(P_VALS)  # update N_P to match snapped grid
@@ -89,7 +89,7 @@ N_P = len(P_VALS)  # update N_P to match snapped grid
 # centroid (with one antipodal pair to make the diameter exact).
 # Range spans from below gamma/K = 0.6 up to ~d_min so all four regimes appear.
 d_min_ring = 3.0 * R_RING * np.sin(np.pi / K)
-RHO_VALS = np.linspace(0.10, 0.5 * d_min_ring, N_RHO)
+RHO_VALS = np.linspace(0.10, 0.25 * d_min_ring, N_RHO)
 
 # Per-block split between block-average rho_bar and per-node deviation delta:
 #     rho_bar_ij = ALPHA      * p_target
@@ -592,6 +592,67 @@ if __name__ == "__main__":
     out_path = os.path.join(out_dir, "cogent_empirical_validation.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"\nFigure saved -> {out_path}")
+
+    # ============================================================
+    # CSV export (long format, one row per heatmap cell).
+    # Use space separator + blank line between rho rows so pgfplots'
+    # `matrix plot*` can render directly.  Includes target axes,
+    # realized empirical axes, every per-mu accuracy, the node-only
+    # baseline, the best/union summaries, and the theory flags.
+    # ============================================================
+    import csv as _csv
+
+    csv_path = os.path.join(out_dir, "cogent_empirical_validation.csv")
+    mu_acc_cols = [f"acc_mu_{mu}" for mu in MU_GRID]
+    header = (
+        ["rho_target", "p_target", "rho_emp", "pmax_emp", "Rstar", "acc_node"]
+        + mu_acc_cols
+        + [
+            "acc_best",
+            "union_recovered",
+            "theory_standalone",
+            "theory_synergistic_gain",
+        ]
+    )
+    with open(csv_path, "w", newline="") as f:
+        w = _csv.writer(f, delimiter=" ")
+        w.writerow(header)
+        for si in range(N_RHO):
+            if si > 0:
+                f.write("\n")  # blank line between rho rows for pgfplots
+            for pi in range(N_P):
+                row = [
+                    f"{RHO_VALS[si]:.6g}",
+                    f"{P_VALS[pi]:.6g}",
+                    f"{rho_grid[si, pi]:.6g}",
+                    f"{pmax_grid[si, pi]:.6g}",
+                    f"{Rstar_grid[si, pi]:.6g}",
+                    f"{acc_node_grid[si, pi]:.6g}",
+                ]
+                row += [f"{g[si, pi]:.6g}" for g in per_mu_grids]
+                row += [
+                    f"{acc_best_grid[si, pi]:.6g}",
+                    f"{int(union_bin[si, pi])}",
+                    f"{int(standalone[si, pi])}",
+                    f"{int(gain_th[si, pi])}",
+                ]
+                w.writerow(row)
+    print(f"CSV saved    -> {csv_path}")
+
+    # Companion 1D axis files (handy for pgfplots `mesh/cols=...` plots).
+    axes_path = os.path.join(out_dir, "cogent_empirical_validation_axes.csv")
+    with open(axes_path, "w", newline="") as f:
+        w = _csv.writer(f, delimiter=" ")
+        w.writerow(["index", "p_target", "pmax_emp", "rho_target", "rho_emp"])
+        n_axis = max(N_P, N_RHO)
+        for k in range(n_axis):
+            row = [k]
+            row.append(f"{P_VALS[k]:.6g}" if k < N_P else "nan")
+            row.append(f"{pmax_axis[k]:.6g}" if k < N_P else "nan")
+            row.append(f"{RHO_VALS[k]:.6g}" if k < N_RHO else "nan")
+            row.append(f"{rho_axis[k]:.6g}" if k < N_RHO else "nan")
+            w.writerow(row)
+    print(f"Axes CSV     -> {axes_path}")
 
     # ============================================================
     # Region-wise summary

@@ -53,19 +53,53 @@ D = 2
 N_PER_CLUSTER = 10  # n = 50 total
 R_RING = 4.0  # centroid ring radius (d_min = 2 R sin(pi/K) ≈ 4.70)
 GAMMA = 3.0  # gamma/K = 0.6
-ALPHA = 0.6  # fully regular graph (per-node deviation = 0)
-N_TRIALS = 10
+N_TRIALS = 2
 
 # Fixed point of the OTHER axis is chosen near the boundary of the
 # recovery region so neither feature-only nor graph-only succeeds alone,
 # but their combination does.
 P_FIXED = 0.25  # fixed for the rho-sweep   (above p* ≈ 0.117)
-RHO_FIXED = 3.0  # fixed for the p-sweep     (above gamma/K = 0.6)
+RHO_FIXED = 2.0  # fixed for the p-sweep     (above gamma/K = 0.6)
 
-# Sweep grids -- snap p targets to the 1/N grid so realized p_max is exact.
-# With ALPHA=1.0 only block-mean rho_bar contributes; granularity = 1/N.
-P_SWEEP = np.arange(1, int(0.5 * N_PER_CLUSTER) + 1) / N_PER_CLUSTER
+# --- p_max sweep ---------------------------------------------------------
+# Paper definition (eq. 6):  p_max = max_{i,j} ( bar_rho_ij + 2 * delta_ij )
+#
+# Our `construct_controlled_graph` builds a fully-regular graph, so
+# delta_ij = 0 in every block; the formula collapses to
+#       p_max = max_{i,j} bar_rho_ij.
+# With m mis-edges per node to each other class (and m missing intra edges
+# per node), bar_rho_ij = bar_rho_ii = m / N_PER_CLUSTER, hence
+#       p_max  =  m / N_PER_CLUSTER     for any m in {0, 1, ..., N}.
+# Achievability: a regular graph requires N * (intra_deg) to be even.
+#   - Even N: every value m/N is achievable exactly.
+#   - Odd N:  only even m hits the target exactly; odd m gets bumped.
+M_SWEEP = np.array([1, 2, 3, 4, 5, 6, 7, 8])  # mis-edges per node
+P_SWEEP = M_SWEEP / N_PER_CLUSTER  # corresponding exact p_max
 RHO_SWEEP = np.linspace(0.5, 4.5, 12)
+
+
+def block_pmax_breakdown(A, labels):
+    """Return (bar_rho_max, two_delta_max, p_max) over all blocks (paper eq. 6)."""
+    classes = np.unique(labels)
+    Kk = len(classes)
+    n_v_j = np.zeros((len(labels), Kk))
+    for jj, cj in enumerate(classes):
+        n_v_j[:, jj] = A[:, labels == cj].sum(axis=1)
+    br_max, td_max, p_max = 0.0, 0.0, 0.0
+    for ii, ci in enumerate(classes):
+        v = np.where(labels == ci)[0]
+        ni = len(v)
+        for jj, cj in enumerate(classes):
+            nj = (labels == cj).sum()
+            nbar_v = (ni - n_v_j[v, jj]) if ii == jj else n_v_j[v, jj]
+            br = float(nbar_v.sum() / (ni * nj))
+            d = float(np.max(np.abs(br - nbar_v / nj)))
+            p = br + 2 * d
+            br_max = max(br_max, br)
+            td_max = max(td_max, 2 * d)
+            p_max = max(p_max, p)
+    return br_max, td_max, p_max
+
 
 # Combined regime: mu controls graph weight (1/(mu*n)).  Smaller mu = stronger
 # graph term.  We try a small grid and take the BEST mu per cell.
@@ -128,8 +162,9 @@ def run_cell(p_target, rho_target, trial_seed):
     X, labels = make_clusters_fixed_rho(rho_target, centroids, N_PER_CLUSTER, rng)
     rho_emp = compute_rho(X, labels)
 
-    A_graph = construct_controlled_graph(labels, p_target, ALPHA)
+    A_graph = construct_controlled_graph(labels, p_target)
     pmax_emp = empirical_pmax(A_graph, labels)
+    br_max, td_max, _ = block_pmax_breakdown(A_graph, labels)
 
     # ---- feature-only: CoGEnT, no graph term ----
     res_f = cogent_structured_atoms_with_W(
@@ -154,7 +189,7 @@ def run_cell(p_target, rho_target, trial_seed):
         if acc_c > acc_c_best:
             acc_c_best = acc_c
 
-    return acc_f, acc_g, acc_c_best, rho_emp, pmax_emp
+    return acc_f, acc_g, acc_c_best, rho_emp, pmax_emp, br_max, td_max
 
 
 def sweep(axis_name, axis_vals, fixed_val):
@@ -174,12 +209,16 @@ def sweep(axis_name, axis_vals, fixed_val):
         accs = np.zeros((N_TRIALS, 3))
         rho_e = np.zeros(N_TRIALS)
         p_e = np.zeros(N_TRIALS)
+        br_e = np.zeros(N_TRIALS)
+        td_e = np.zeros(N_TRIALS)
         for t in range(N_TRIALS):
             seed = 1000 * (i + 1) + t
-            af, ag, ac, re, pe = run_cell(p_target, rho_target, seed)
+            af, ag, ac, re, pe, br, td = run_cell(p_target, rho_target, seed)
             accs[t] = [af, ag, ac]
             rho_e[t] = re
             p_e[t] = pe
+            br_e[t] = br
+            td_e[t] = td
         means[i] = accs.mean(0)
         stds[i] = accs.std(0)
         rho_emp_log[i] = rho_e.mean()
@@ -187,6 +226,7 @@ def sweep(axis_name, axis_vals, fixed_val):
         print(
             f"  {axis_name}={v:.4f}  rho_emp={rho_emp_log[i]:.3f}  "
             f"pmax_emp={pmax_emp_log[i]:.3f}  "
+            f"(bar_rho={br_e.mean():.3f} + 2*delta={td_e.mean():.3f})  "
             f"feat={means[i,0]:.3f}  graph={means[i,1]:.3f}  combined={means[i,2]:.3f}"
         )
     return means, stds, rho_emp_log, pmax_emp_log
@@ -260,3 +300,73 @@ if __name__ == "__main__":
     out = os.path.join(_HERE, "sweep_p_rho.png")
     fig.savefig(out, dpi=150)
     print(f"\nSaved figure: {out}")
+
+    # ------------------------------------------------------------------
+    # CSV export for pgfplots / TikZ.
+    # Space-separated, one header row; pgfplots reads via:
+    #   \pgfplotstableread[col sep=space, header=true]{sweep_p.dat}\tbl
+    #   \addplot table[x=p, y=feat] {\tbl};
+    # ------------------------------------------------------------------
+    import csv
+
+    def _write_csv(path, header, rows):
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f, delimiter=" ")
+            w.writerow(header)
+            for r in rows:
+                w.writerow([f"{v:.6g}" for v in r])
+        print(f"Saved CSV:    {path}")
+
+    p_header = [
+        "p_target",
+        "pmax_emp",
+        "rho_emp",
+        "feat_mean",
+        "graph_mean",
+        "combined_mean",
+        "feat_std",
+        "graph_std",
+        "combined_std",
+    ]
+    p_rows = [
+        [
+            P_SWEEP[i],
+            pmax_e_p[i],
+            rho_e_p[i],
+            means_p[i, 0],
+            means_p[i, 1],
+            means_p[i, 2],
+            stds_p[i, 0],
+            stds_p[i, 1],
+            stds_p[i, 2],
+        ]
+        for i in range(len(P_SWEEP))
+    ]
+    _write_csv(os.path.join(_HERE, "sweep_p.csv"), p_header, p_rows)
+
+    r_header = [
+        "rho_target",
+        "rho_emp",
+        "pmax_emp",
+        "feat_mean",
+        "graph_mean",
+        "combined_mean",
+        "feat_std",
+        "graph_std",
+        "combined_std",
+    ]
+    r_rows = [
+        [
+            RHO_SWEEP[i],
+            rho_e_r[i],
+            pmax_e_r[i],
+            means_r[i, 0],
+            means_r[i, 1],
+            means_r[i, 2],
+            stds_r[i, 0],
+            stds_r[i, 1],
+            stds_r[i, 2],
+        ]
+        for i in range(len(RHO_SWEEP))
+    ]
+    _write_csv(os.path.join(_HERE, "sweep_rho.csv"), r_header, r_rows)
