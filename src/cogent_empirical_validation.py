@@ -69,7 +69,7 @@ MU_GRID = [0.6, 1.2]
 
 N_P = 10
 N_RHO = 10
-N_TRIALS = 20
+N_TRIALS = 5
 
 P_STAR = ((K + 4) - np.sqrt((K + 4) ** 2 - 16)) / 8.0
 GAMMA_K = GAMMA / K  # = 0.6 for K=5, gamma=3

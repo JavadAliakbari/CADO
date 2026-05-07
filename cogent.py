@@ -13,6 +13,12 @@ from update_A import update_A, canonicalize_atoms
 # from update_W import update_W_projected_gradient_original
 from update_W import update_W, graph_term_value
 
+from update_Pi import (
+    update_Pi,
+    label_term_value,
+    predict_node_labels,
+)
+
 from cluster_generation import (
     generate_clusters_with_directions,
     random_sparse_directions,
@@ -41,7 +47,13 @@ def alternating_WA_refinement(
     verbose: bool = False,
     A_graph: np.ndarray | None = None,
     gamma_graph: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray]:
+    Pi: np.ndarray | None = None,
+    tilde_y: np.ndarray | None = None,
+    train_mask: np.ndarray | None = None,
+    beta: float = 0.0,
+    K_classes: int = 0,
+    pi_method: str = "cf",
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Perform alternating optimization cycles on W and A.
 
@@ -84,6 +96,14 @@ def alternating_WA_refinement(
     A : ndarray
         Refined A.
     """
+    use_label = (
+        Pi is not None
+        and tilde_y is not None
+        and train_mask is not None
+        and beta != 0.0
+        and K_classes > 0
+    )
+
     for _ in range(int(num_cycles)):
         W = update_W(
             W_init=W,
@@ -118,6 +138,19 @@ def alternating_WA_refinement(
             verbose=verbose,
         )
 
+        if use_label and Pi.size > 0:
+            Pi = update_Pi(
+                Pi_init=Pi,
+                W=W,
+                tilde_y=tilde_y,
+                train_mask=train_mask,
+                beta=beta,
+                K_classes=K_classes,
+                method=pi_method,
+            )
+
+    if use_label:
+        return W, A, Pi
     return W, A
 
 
@@ -480,13 +513,19 @@ def objective_full(
     gamma: float,
     A_graph: np.ndarray | None = None,
     gamma_graph: float = 0.0,
+    Pi: np.ndarray | None = None,
+    tilde_y: np.ndarray | None = None,
+    train_mask: np.ndarray | None = None,
+    beta: float = 0.0,
 ) -> float:
     """
-    Eq.(15) full objective (weighted k-means + SON + optional graph term):
+    Eq.(15) full objective (weighted k-means + SON + optional graph + optional label):
 
         (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
         + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
-        - gamma_graph * <Abar, L>   (if A_graph is not None)
+        - gamma_graph * <Abar, L>           (if A_graph is not None)
+        - beta  * sum_{v in train} sum_i W_iv * Pi_{i, tilde_y_v}
+                                              (if Pi is not None and beta != 0)
           where Abar = 2*A_graph - 1,  L = sqrt(W)^T sqrt(W)
     """
     D = (
@@ -502,7 +541,15 @@ def objective_full(
         if A_graph is not None and gamma_graph != 0.0
         else 0.0
     )
-    return fit + gamma * son + graph
+    label = (
+        label_term_value(W, Pi, tilde_y, train_mask, beta)
+        if Pi is not None
+        and beta != 0.0
+        and tilde_y is not None
+        and train_mask is not None
+        else 0.0
+    )
+    return fit + gamma * son + graph + label
 
 
 def q_rows_full(
@@ -563,6 +610,11 @@ def cogent_structured_atoms_with_W(
     truncation: bool = True,
     seed: int | None = None,
     A_graph: np.ndarray | None = None,
+    tilde_y: np.ndarray | None = None,
+    train_mask: np.ndarray | None = None,
+    beta: float = 0.0,
+    K_classes: int = 0,
+    pi_method: str = "cf",
 ) -> dict:
     """
     CoGEnT with quadratic (unconstrained) node loss.
@@ -615,20 +667,40 @@ def cogent_structured_atoms_with_W(
     gamma_graph: float = (1.0 / (mu * n)) if use_graph else 0.0
     _A_graph = A_graph if use_graph else None
 
+    use_label = (
+        beta != 0.0 and tilde_y is not None and train_mask is not None and K_classes > 0
+    )
+    _tilde_y = np.asarray(tilde_y).astype(int) if use_label else None
+    _train_mask = np.asarray(train_mask).astype(bool) if use_label else None
+
     W = np.zeros((0, n), dtype=float)
     A_atoms = np.zeros((0, d), dtype=float)
+    Pi_atoms = np.zeros((0, K_classes if use_label else 0), dtype=float)
 
     if init_with_one_atom:
         a0 = np.mean(X, axis=0)
         W = np.ones((1, n), dtype=float)
         A_atoms = a0.reshape(1, d)
+        if use_label:
+            Pi_atoms = np.full((1, K_classes), 1.0 / K_classes, dtype=float)
 
     obj_hist = []
     info_hist = []
 
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_prev = objective_full(X, W, A_atoms, gamma_obj, _A_graph, gamma_graph)
+        obj_prev = objective_full(
+            X,
+            W,
+            A_atoms,
+            gamma_obj,
+            _A_graph,
+            gamma_graph,
+            Pi=Pi_atoms if use_label else None,
+            tilde_y=_tilde_y,
+            train_mask=_train_mask,
+            beta=beta,
+        )
 
         Q = q_rows_full(X, M, gamma_obj, eps=eps)
         a_new, v_star = forward_atom_from_Q(Q, X=X, eps=eps)
@@ -645,11 +717,12 @@ def cogent_structured_atoms_with_W(
             if A_atoms.size
             else a_new.reshape(1, d)
         )
+        if use_label:
+            new_pi = np.full((1, K_classes), 1.0 / K_classes, dtype=float)
+            Pi_atoms = np.vstack([Pi_atoms, new_pi]) if Pi_atoms.size else new_pi
 
         for _ in range(int(inner_alt_cycles)):
-            # Lc = build_Lc_from_WA(W, A_atoms, eps=eps)
-
-            W, A_atoms = alternating_WA_refinement(
+            ret = alternating_WA_refinement(
                 W=W,
                 A=A_atoms,
                 X=X,
@@ -662,10 +735,31 @@ def cogent_structured_atoms_with_W(
                 verbose=False,
                 A_graph=_A_graph,
                 gamma_graph=gamma_graph,
+                Pi=Pi_atoms if use_label else None,
+                tilde_y=_tilde_y,
+                train_mask=_train_mask,
+                beta=beta,
+                K_classes=K_classes if use_label else 0,
+                pi_method=pi_method,
             )
+            if use_label:
+                W, A_atoms, Pi_atoms = ret
+            else:
+                W, A_atoms = ret
 
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_post = objective_full(X, W, A_atoms, gamma_obj, _A_graph, gamma_graph)
+        obj_post = objective_full(
+            X,
+            W,
+            A_atoms,
+            gamma_obj,
+            _A_graph,
+            gamma_graph,
+            Pi=Pi_atoms if use_label else None,
+            tilde_y=_tilde_y,
+            train_mask=_train_mask,
+            beta=beta,
+        )
         if truncation:
             W, A_atoms, obj_final, removed_log = truncation_backward_W(
                 X=X,
@@ -674,7 +768,7 @@ def cogent_structured_atoms_with_W(
                 gamma_obj=gamma_obj,
                 obj_prev=obj_prev,
                 obj_post=obj_post,
-                eta=0.5,
+                eta=0.9,
                 trunc_refine_cycles=inner_alt_cycles,
                 pg_max_iter=pg_max_iter,
                 pg_step_size=1e-2,
@@ -698,11 +792,22 @@ def cogent_structured_atoms_with_W(
         )
 
         if verbose:
+            acc_str = ""
+            if (
+                use_label
+                and Pi_atoms.size > 0
+                and _tilde_y is not None
+                and _train_mask is not None
+            ):
+                y_pred_iter = (W.T @ Pi_atoms).argmax(axis=1)
+                train_acc = (y_pred_iter[_train_mask] == _tilde_y[_train_mask]).mean()
+                acc_str = f"train_acc={train_acc:.4f} "
             print(
                 f"iter={t:02d} "
                 f"K={W.shape[0]} "
                 # f"obj_prev={obj_prev:.4f} "
                 f"obj_post={obj_post:.4f} "
+                f"{acc_str}"
                 # f"rho={rho_opt:.4f} "
                 # f"v_star={v_star}"
             )
@@ -731,6 +836,11 @@ def cogent_structured_atoms_with_W(
         "W": W,  # shape (k, n)
         "S": W.T,  # compatibility view, shape (n, k)
         "A_atoms": A_atoms,  # shape (k, d)
+        "Pi_atoms": Pi_atoms,  # shape (k, K_classes), simplex rows (empty if no label term)
+        "pi_v": (W.T @ Pi_atoms) if Pi_atoms.size else np.zeros((n, 0)),
+        "y_pred": (
+            (W.T @ Pi_atoms).argmax(axis=1) if Pi_atoms.size else np.zeros(n, dtype=int)
+        ),
         "lam": lam,  # lambda_i = sum_v w_iv
         "E_sq": E_sq,  # shape (k, n), e_{iv}^2
         "obj_hist": np.array(obj_hist, dtype=float),
@@ -950,12 +1060,13 @@ if __name__ == "__main__":
 
     # 2) Side-by-side atom comparison
     fig_c, axes = plt.subplots(1, 2, figsize=(13, 5))
-    for ax, res, title in zip(
+    for ax, res, acc, title in zip(
         axes,
         [res_base, res_graph],
+        [acc_base, acc_graph],
         [
-            f"Baseline (no graph)  acc={acc_base:.3f}",
-            f"+ Graph term  acc={acc_graph:.3f}",
+            "Baseline (no graph)",
+            "+ Graph term",
         ],
     ):
         hard = res["W"].argmax(axis=0)
@@ -976,13 +1087,25 @@ if __name__ == "__main__":
                 edgecolors="red",
                 facecolors="none",
                 linewidths=2,
-                label="atoms",
+                label="CoGEnT atoms",
             )
-        ax.set_title(title)
+        # CVX reference atoms
+        if A_opt is not None:
+            ax.scatter(
+                A_opt[:, 0],
+                A_opt[:, 1],
+                marker="D",
+                s=120,
+                edgecolors="blue",
+                facecolors="none",
+                linewidths=2,
+                label="CVX atoms",
+            )
+        ax.set_title(f"{title}\nacc={acc:.4f}", fontsize=11)
         ax.axis("equal")
         ax.set_xlabel("x1")
         ax.set_ylabel("x2")
         ax.legend(fontsize=8)
-    fig_c.suptitle(f"CoGEnT atoms  γ={gamma:.4f}  μ={mu:.1f}  p={p}")
+    fig_c.suptitle(f"CoGEnT atoms  γ={gamma:.4f}  μ={mu:.1f}  p={p}", fontsize=13)
     plt.tight_layout()
     plt.show()

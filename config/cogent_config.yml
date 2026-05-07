@@ -26,7 +26,7 @@ data:
   d: 2                    # feature dimension
   K_true: 3               # number of ground-truth clusters
   n_per_cluster: 100      # nodes per cluster
-  sigma: 0.5              # intra-cluster Gaussian noise std
+  sigma: 0.8              # intra-cluster Gaussian noise std
   ell: 1000.0             # large-radius parameter for cluster direction generation
   radii: [1.5, 1.7, 2.0] # cluster centroid radii
   num_active_directions: 1 # sparsity of the random direction vectors
@@ -44,7 +44,7 @@ graph:
 model:
   gamma: 1.5    # fusion penalty; the SON coefficient in the code is gamma/n
                 # Relation to old API:  gamma = gamma_obj * n
-  mu: 20.0     # relative weight of node-info vs graph structure; 1/(mu*n) is
+  mu: 2.0     # relative weight of node-info vs graph structure; 1/(mu*n) is
                 # the graph-term coefficient in the code.
                 # Relation to old API:  mu = 1 / (gamma_graph * n)
                 # Set mu to a very large number (e.g. 1e12) to disable graph term.
