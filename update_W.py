@@ -86,12 +86,16 @@ def objective_W_original(
     A: np.ndarray,
     X: np.ndarray,
     gamma_obj: float,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
 ) -> float:
     """
     Eq.(15) W-subproblem objective (weighted k-means formulation):
 
         (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
-        + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
+        + gamma_obj * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
+        + gamma_graph * ||A_graph - L||_1      (if A_graph is not None)
+          where L = sqrt(W)^T sqrt(W)
 
     W: (k, n)
     A: (k, d)
@@ -123,7 +127,12 @@ def objective_W_original(
     # Sum of norms
     fusion = np.sum(np.linalg.norm(Z, axis=0))
 
-    return float(fit + gamma_obj * fusion)
+    graph = (
+        gamma_graph * graph_term_value(W, A_graph)
+        if A_graph is not None and gamma_graph != 0.0
+        else 0.0
+    )
+    return float(fit + gamma_obj * fusion + graph)
 
 
 def compute_W_subgradient_original_fast(
@@ -132,12 +141,15 @@ def compute_W_subgradient_original_fast(
     X: np.ndarray,
     gamma_obj: float,
     eps: float = 1e-12,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
 ) -> np.ndarray:
     """
     Vectorized subgradient wrt W for the eq.(15) objective.
 
     Fit gradient:  (1/2) * D  where D[i,v] = ||x_v - a_i||^2.
     SON gradient:  gamma_obj * A @ G_SON^T  (unchanged by chain rule).
+    Graph gradient (optional): gamma_graph * d/dW ||A_graph - L||_1.
 
     W: (k, n), A: (k, d), X: (n, d)
     """
@@ -170,6 +182,10 @@ def compute_W_subgradient_original_fast(
 
     np.add.at(G, (slice(None), u_idx), gamma_obj * pair_grad)
     np.add.at(G, (slice(None), v_idx), -gamma_obj * pair_grad)
+
+    # Graph term gradient (optional)
+    if A_graph is not None and gamma_graph != 0.0:
+        G += gamma_graph * graph_term_subgradient_W(W, A_graph, eps=eps)
 
     return G
 
@@ -232,6 +248,53 @@ def compute_single_column_subgradient_original(
 
 
 # ============================================================
+# Graph term  -<Abar, L>,  Abar = 2*A_graph - 1,  L = sqW^T sqW
+#
+# Equivalence (Appendix B.1 of the paper):
+#   With A_{uv} in {0,1} and L_{uv} in [0,1] (automatically satisfied when
+#   W has simplex columns),  ||L - A||_1 = const - <Abar, L>,  so minimising
+#   ||L - A||_1 over L equals minimising -<Abar, L>.
+#
+# L = sqW^T sqW satisfies 0 <= L_{uv} <= 1 and L_{vv} = 1 automatically
+# (Cauchy-Schwarz + simplex constraint on W columns).
+#
+# Derivation:
+#   sqW  = sqrt(W)  element-wise             (k, n)
+#   L    = sqW^T sqW                         (n, n)
+#   h(W) = -tr(Abar^T L) = -tr(sqW Abar sqW^T)
+#   dh/dS = -2 sqW Abar          (Abar symmetric)
+#   chain:  dh/dW[i,u] = -[sqW Abar]_{i,u} / sqW[i,u]
+# ============================================================
+
+
+def graph_term_value(W: np.ndarray, A_graph: np.ndarray) -> float:
+    """-<Abar, L>  where  Abar = 2*A_graph - 1,  L = sqrt(W)^T sqrt(W)."""
+    sqW = np.sqrt(np.maximum(W, 0.0))
+    L = sqW.T @ sqW
+    Abar = 2.0 * A_graph - 1.0
+    return float(-np.sum(Abar * L))
+
+
+def graph_term_subgradient_W(
+    W: np.ndarray,
+    A_graph: np.ndarray,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    Gradient of -<Abar, L> wrt W (shape k x n),  Abar = 2*A_graph - 1.
+
+    grad[i, u] = -[sqW @ Abar]_{i,u} / (sqW[i,u] + eps_safe)
+
+    The term is smooth (quadratic in sqW), so no sign/subgradient ambiguity.
+    eps_safe = max(eps, 1e-4) guards against division by zero at W ≈ 0.
+    """
+    sqW = np.sqrt(np.maximum(W, 0.0))  # (k, n)
+    Abar = 2.0 * A_graph - 1.0  # (n, n), fixed — no L needed
+    eps_safe = max(float(eps), 1e-4)
+    return -(sqW @ Abar) / (sqW + eps_safe)  # (k, n)
+
+
+# ============================================================
 # 1) Projected gradient / subgradient
 # ============================================================
 
@@ -249,6 +312,8 @@ def update_W_projected_gradient_original(
     backtracking_beta: float = 0.5,
     min_step_size: float = 1e-14,
     verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
 ) -> np.ndarray:
     W = np.asarray(W_init, dtype=float).copy()
     A = np.asarray(A, dtype=float)
@@ -257,10 +322,12 @@ def update_W_projected_gradient_original(
     for v in range(W.shape[1]):
         W[:, v] = project_to_simplex(W[:, v])
 
-    current_obj = objective_W_original(W, A, X, gamma_obj)
+    current_obj = objective_W_original(W, A, X, gamma_obj, A_graph, gamma_graph)
 
     for it in range(max_iter):
-        G = compute_W_subgradient_original_fast(W, A, X, gamma_obj, eps=eps)
+        G = compute_W_subgradient_original_fast(
+            W, A, X, gamma_obj, eps=eps, A_graph=A_graph, gamma_graph=gamma_graph
+        )
 
         step = step_size
         accepted = False
@@ -270,7 +337,9 @@ def update_W_projected_gradient_original(
             # Vectorized simplex projection for all columns
             W_candidate = project_columns_to_simplex(W_candidate)
 
-            candidate_obj = objective_W_original(W_candidate, A, X, gamma_obj)
+            candidate_obj = objective_W_original(
+                W_candidate, A, X, gamma_obj, A_graph, gamma_graph
+            )
 
             if (not use_backtracking) or (candidate_obj <= current_obj):
                 accepted = True

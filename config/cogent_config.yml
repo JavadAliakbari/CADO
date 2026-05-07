@@ -1,0 +1,65 @@
+# =============================================================================
+# CoGEnT (Column-Generation Transductive) — hyperparameter configuration
+#
+# Parameter naming follows the paper (eq. 15):
+#
+#   min  ||L - A||_1
+#        + mu * n * ( sum_{v,i} lambda_i eps^2_{i,v} f_v(theta_i)
+#                     + gamma/n * sum_{u<v} ||theta_u - theta_v|| )
+#
+# Equivalently (dividing through by mu*n and using
+# ||L - A||_1 = const - <Abar, L> with Abar = 2A - 1):
+#
+#   min  (1/(mu*n)) * (-<Abar, L>)  +  fit  +  (gamma/n) * SON
+#        ^^^^^^^^^^^^^^^^^^^^^^          ^^^^     ^^^^^^^^^^^^^^^^^
+#        graph_weight = 1/(mu*n)         fit     gamma_obj = gamma/n
+#
+#   mu -> 0  :  graph-only  (problem (1) in the paper)
+#   mu -> inf:  node-only   (problem (4) in the paper)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Data / problem generation
+# ---------------------------------------------------------------------------
+data:
+  seed: 0
+  d: 2                    # feature dimension
+  K_true: 3               # number of ground-truth clusters
+  n_per_cluster: 100      # nodes per cluster
+  sigma: 0.5              # intra-cluster Gaussian noise std
+  ell: 1000.0             # large-radius parameter for cluster direction generation
+  radii: [1.5, 1.7, 2.0] # cluster centroid radii
+  num_active_directions: 1 # sparsity of the random direction vectors
+
+# ---------------------------------------------------------------------------
+# Graph (Stochastic Block Model)
+# ---------------------------------------------------------------------------
+graph:
+  p_out: 0.1   # inter-cluster edge probability  (between-block Bernoulli param)
+               # intra-cluster prob = 1 - p_out  (within-block Bernoulli param)
+
+# ---------------------------------------------------------------------------
+# Model parameters  (paper's γ and μ, eq. 15)
+# ---------------------------------------------------------------------------
+model:
+  gamma: 1.5    # fusion penalty; the SON coefficient in the code is gamma/n
+                # Relation to old API:  gamma = gamma_obj * n
+  mu: 20.0     # relative weight of node-info vs graph structure; 1/(mu*n) is
+                # the graph-term coefficient in the code.
+                # Relation to old API:  mu = 1 / (gamma_graph * n)
+                # Set mu to a very large number (e.g. 1e12) to disable graph term.
+
+# ---------------------------------------------------------------------------
+# CoGEnT solver
+# ---------------------------------------------------------------------------
+solver:
+  max_iters: 15           # outer column-generation iterations
+  init_with_one_atom: false
+  rho_grid_size: 21       # grid size for the rho line-search (unused currently)
+  inner_alt_cycles: 3     # W / A alternating refinement cycles per outer iter
+  pg_max_iter: 10         # projected-gradient steps per W update
+  pg_step_size: 0.05      # projected-gradient initial step size
+  pg_tol: 1.0e-9          # projected-gradient convergence tolerance
+  eps: 1.0e-12            # numerical epsilon (denominators, subgradients)
+  truncation: true        # enable backward-truncation pruning of atoms
+  verbose: true

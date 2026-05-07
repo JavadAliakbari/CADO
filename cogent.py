@@ -11,7 +11,7 @@ from optimized_solution import (
 from update_A import update_A, canonicalize_atoms
 
 # from update_W import update_W_projected_gradient_original
-from update_W import update_W
+from update_W import update_W, graph_term_value
 
 from cluster_generation import (
     generate_clusters_with_directions,
@@ -39,6 +39,8 @@ def alternating_WA_refinement(
     w_method: str = "pg",
     a_method: str = "fista",
     verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Perform alternating optimization cycles on W and A.
@@ -69,6 +71,11 @@ def alternating_WA_refinement(
         Method for A update ("fista", "cf", "bcd", "pg", "qn").
     verbose : bool
         Print progress.
+    A_graph : (n, n) ndarray or None
+        Graph adjacency matrix. If provided, adds gamma_graph * ||A_graph - L||_1
+        to the W subproblem objective where L = sqrt(W)^T sqrt(W).
+    gamma_graph : float
+        Weight of the graph term.
 
     Returns
     -------
@@ -89,6 +96,8 @@ def alternating_WA_refinement(
             randomized=True,
             seed=0,
             verbose=verbose,
+            A_graph=A_graph,
+            gamma_graph=gamma_graph,
         )
 
         # Use a conservative step for A: 1 / lambda_max gives cheap FISTA
@@ -167,6 +176,8 @@ def truncation_backward_W(
     pg_tol: float = 1e-6,
     eps: float = 1e-12,
     verbose: bool = False,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, float, list[dict]]:
     """
     Backward truncation for the W-based CoGEnT variant.
@@ -236,7 +247,7 @@ def truncation_backward_W(
     n, d = X.shape
     threshold = float(eta * obj_prev + (1.0 - eta) * obj_post)
 
-    obj_cur = objective_full(X, W_cur, A_cur, gamma_obj)
+    obj_cur = objective_full(X, W_cur, A_cur, gamma_obj, A_graph, gamma_graph)
 
     removed_log = []
 
@@ -270,10 +281,12 @@ def truncation_backward_W(
                     tol=pg_tol,
                     eps=eps,
                     verbose=False,
+                    A_graph=A_graph,
+                    gamma_graph=gamma_graph,
                 )
 
             # 3) Evaluate true objective after removal
-            obj_try = objective_full(X, W_try, A_try, gamma_obj)
+            obj_try = objective_full(X, W_try, A_try, gamma_obj, A_graph, gamma_graph)
 
             if obj_try < best_obj:
                 best_obj = float(obj_try)
@@ -460,12 +473,21 @@ def _update_A_hard_clusters(
     return A
 
 
-def objective_full(X: np.ndarray, W: np.ndarray, A: np.ndarray, gamma: float) -> float:
+def objective_full(
+    X: np.ndarray,
+    W: np.ndarray,
+    A: np.ndarray,
+    gamma: float,
+    A_graph: np.ndarray | None = None,
+    gamma_graph: float = 0.0,
+) -> float:
     """
-    Eq.(15) full objective (weighted k-means + SON):
+    Eq.(15) full objective (weighted k-means + SON + optional graph term):
 
         (1/2) sum_{i,v} W_iv ||x_v - a_i||^2
         + gamma * sum_{u<v} ||(W^T A)_u - (W^T A)_v||_2
+        - gamma_graph * <Abar, L>   (if A_graph is not None)
+          where Abar = 2*A_graph - 1,  L = sqrt(W)^T sqrt(W)
     """
     D = (
         np.sum(A**2, axis=1, keepdims=True)  # (k, 1)
@@ -475,7 +497,12 @@ def objective_full(X: np.ndarray, W: np.ndarray, A: np.ndarray, gamma: float) ->
     fit = 0.5 * float(np.sum(W * D))
     M = W.T @ A
     son = son_value_all_pairs(M)
-    return fit + gamma * son
+    graph = (
+        gamma_graph * graph_term_value(W, A_graph)
+        if A_graph is not None and gamma_graph != 0.0
+        else 0.0
+    )
+    return fit + gamma * son + graph
 
 
 def q_rows_full(
@@ -522,7 +549,8 @@ def augment_W_with_rho(W: np.ndarray, rho: float, n: int) -> np.ndarray:
 
 def cogent_structured_atoms_with_W(
     X: np.ndarray,
-    gamma_obj: float,
+    gamma: float,
+    mu: float = float("inf"),
     max_iters: int = 15,
     init_with_one_atom: bool = True,
     rho_grid_size: int = 21,
@@ -534,10 +562,35 @@ def cogent_structured_atoms_with_W(
     verbose: bool = True,
     truncation: bool = True,
     seed: int | None = None,
+    A_graph: np.ndarray | None = None,
 ) -> dict:
     """
     CoGEnT with quadratic (unconstrained) node loss.
 
+    Parameters follow the paper (eq. 15):
+
+        min  ||L-A||_1  +  mu*n * ( fit  +  gamma/n * SON )
+
+    Equivalent (after dividing by mu*n and using ||L-A||_1 = const - <Abar,L>):
+
+        min  fit  +  (gamma/n) * SON  +  (1/(mu*n)) * (-<Abar,L>)
+
+    Parameters
+    ----------
+    gamma : float
+        Fusion (SON) penalty — paper's γ.  The SON coefficient used internally
+        is ``gamma_obj = gamma / n``.
+    mu : float
+        Relative weight of the node-information block vs. the graph term —
+        paper's μ.  The graph-term weight used internally is
+        ``gamma_graph = 1 / (mu * n)``.
+        ``mu = inf`` (default) disables the graph term (node-only regime).
+        ``mu → 0`` recovers the graph-only regime.
+    A_graph : (n, n) ndarray, optional
+        Binary adjacency matrix.  Required when mu < inf.
+
+    Algorithm steps
+    ---------------
     1) Find a_new from the forward step (initialized at the data point
        with the largest gradient norm).
     2) Find rho_opt and initialize
@@ -553,6 +606,15 @@ def cogent_structured_atoms_with_W(
     X = np.asarray(X, dtype=float)
     n, d = X.shape
 
+    # Convert paper parameters (gamma, mu) to internal coefficients.
+    #   gamma_obj  = gamma / n          (SON coefficient)
+    #   gamma_graph = 1 / (mu * n)      (graph-term coefficient)
+    # mu = inf  <=>  graph term disabled (node-only regime).
+    gamma_obj: float = gamma / n
+    use_graph = A_graph is not None and not np.isinf(mu) and mu > 0.0
+    gamma_graph: float = (1.0 / (mu * n)) if use_graph else 0.0
+    _A_graph = A_graph if use_graph else None
+
     W = np.zeros((0, n), dtype=float)
     A_atoms = np.zeros((0, d), dtype=float)
 
@@ -566,7 +628,7 @@ def cogent_structured_atoms_with_W(
 
     for t in range(int(max_iters)):
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_prev = objective_full(X, W, A_atoms, gamma_obj)
+        obj_prev = objective_full(X, W, A_atoms, gamma_obj, _A_graph, gamma_graph)
 
         Q = q_rows_full(X, M, gamma_obj, eps=eps)
         a_new, v_star = forward_atom_from_Q(Q, X=X, eps=eps)
@@ -598,14 +660,12 @@ def cogent_structured_atoms_with_W(
                 tol=pg_tol,
                 eps=eps,
                 verbose=False,
+                A_graph=_A_graph,
+                gamma_graph=gamma_graph,
             )
 
         M = build_M_from_W(W, A_atoms, n, d)
-        obj_post = objective_full(X, W, A_atoms, gamma_obj)
-
-        lam, E_sq = recover_lambda_and_Esq(W, eps=eps)
-
-        # after you computed obj_prev and obj_post
+        obj_post = objective_full(X, W, A_atoms, gamma_obj, _A_graph, gamma_graph)
         if truncation:
             W, A_atoms, obj_final, removed_log = truncation_backward_W(
                 X=X,
@@ -620,6 +680,8 @@ def cogent_structured_atoms_with_W(
                 pg_step_size=1e-2,
                 pg_tol=1e-6,
                 verbose=False,
+                A_graph=_A_graph,
+                gamma_graph=gamma_graph,
             )
 
         obj_hist.append(float(obj_post))
@@ -681,18 +743,46 @@ def cogent_structured_atoms_with_W(
 # ============================================================
 
 if __name__ == "__main__":
-    seed = 0
+    import os
+    import yaml  # pip install pyyaml
+
+    # ── Load config ───────────────────────────────────────────────────────
+    _cfg_path = os.path.join(os.path.dirname(__file__), "config", "cogent_config.yml")
+    with open(_cfg_path) as _f:
+        _cfg = yaml.safe_load(_f)
+
+    _d_cfg = _cfg["data"]
+    _g_cfg = _cfg["graph"]
+    _m_cfg = _cfg["model"]
+    _s_cfg = _cfg["solver"]
+
+    seed = int(_d_cfg["seed"])
+    d = int(_d_cfg["d"])
+    ell = float(_d_cfg["ell"])
+    K_true = int(_d_cfg["K_true"])
+    n_per_cluster = int(_d_cfg["n_per_cluster"])
+    sigma = float(_d_cfg["sigma"])
+    radii = list(_d_cfg["radii"])
+    num_active = int(_d_cfg["num_active_directions"])
+
+    p = float(_g_cfg["p_out"])  # inter-cluster Bernoulli param
+
+    gamma = float(_m_cfg["gamma"])  # paper's γ: SON coeff = γ/n
+    mu = float(_m_cfg["mu"])  # paper's μ: graph weight = 1/(μ·n)
+
+    max_iters = int(_s_cfg["max_iters"])
+    init_one_atom = bool(_s_cfg["init_with_one_atom"])
+    alt_cycles = int(_s_cfg["inner_alt_cycles"])
+    pg_max_iter = int(_s_cfg["pg_max_iter"])
+    pg_step_size = float(_s_cfg["pg_step_size"])
+    pg_tol = float(_s_cfg["pg_tol"])
+    eps = float(_s_cfg["eps"])
+    truncation = bool(_s_cfg["truncation"])
+    verbose = bool(_s_cfg["verbose"])
+
     np.random.seed(seed)
 
-    d = 2
-    ell = 1000.0  # large ball radius for the CVX reference solver (effectively unconstrained)
-    K_true = 3
-    n_per_cluster = 100
-    sigma = 0.3
-    gamma_val = 0.5 / n_per_cluster
-
-    radii = [1.5, 1.7, 2.0]
-    directions = random_sparse_directions(K_true, d, num_active=1, seed=seed)
+    directions = random_sparse_directions(K_true, d, num_active=num_active, seed=seed)
 
     X, labels, centroids, _ = generate_clusters_with_directions(
         d=d,
@@ -704,53 +794,195 @@ if __name__ == "__main__":
         normalize_data=False,
         seed=seed,
     )
-    # plot_data(X, labels, centroids)
+    n = len(labels)
 
+    # Derived internal coefficients (shown for reference)
+    gamma_obj_val = gamma / n  # SON coefficient
+    gamma_graph_val = 1.0 / (mu * n)  # graph-term coefficient
+    print(f"Config: gamma={gamma}, mu={mu}, n={n}")
+    print(f"  -> gamma_obj (SON coeff)   = gamma/n      = {gamma_obj_val:.4e}")
+    print(f"  -> gamma_graph (graph coeff) = 1/(mu*n) = {gamma_graph_val:.4e}")
+
+    # ── SBM adjacency matrix ──────────────────────────────────────────────
+    rng = np.random.default_rng(seed)
+    same_block = (labels[:, None] == labels[None, :]).astype(float)
+    probs = same_block * (1 - p) + (1 - same_block) * p
+    upper = rng.random((n, n))
+    upper = (upper < probs).astype(float)
+    A_graph = np.triu(upper, k=1)
+    A_graph = A_graph + A_graph.T
+
+    # ── CVX reference (no graph term) ───────────────────────────────────
     result = solve_A_hard_assignments_cvxpy(
         X=X,
         labels=labels,
-        # ell=ell,
-        gamma=gamma_val,
+        gamma=gamma_obj_val,  # CVX solver uses internal gamma_obj
         solver=None,
         verbose=False,
     )
-
     A_opt = result["A_opt"]
     W_true = build_W_from_labels(labels, K=K_true)
-    obj_check = objective_from_WA(X, W_true, A_opt, gamma_val)
+    obj_check = objective_from_WA(X, W_true, A_opt, gamma_obj_val)
 
-    print("Status:", result["status"])
-    print("Cluster sizes:", result["cluster_sizes"])
-    print("Optimal A:")
+    print("CVX status:", result["status"])
+    print("CVX optimal objective:", round(result["objective_value"], 5))
+    print("CVX atoms:")
     print(np.array2string(A_opt, precision=4, suppress_small=True))
-    print("Empirical means (gamma=0 solution):")
-    print(np.array2string(result["empirical_means"], precision=4, suppress_small=True))
-    print("Fit value:", result["fit_value"])
-    print("Fusion value:", result["fusion_value"])
-    print("Optimal objective:", result["objective_value"])
-    print("Objective recomputed from W,A:", obj_check)
 
-    res = cogent_structured_atoms_with_W(
+    # ── CoGEnT baseline (no graph term, mu=inf) ──────────────────────────
+    print("\n── CoGEnT (no graph term) ──")
+    res_base = cogent_structured_atoms_with_W(
         X=X,
-        gamma_obj=gamma_val,
-        max_iters=10,
-        init_with_one_atom=False,
-        rho_grid_size=21,
-        inner_alt_cycles=3,
-        pg_max_iter=10,
-        pg_step_size=5e-2,
-        pg_tol=1e-9,
-        verbose=True,
-        truncation=True,
+        gamma=gamma,
+        mu=float("inf"),  # node-only regime
+        max_iters=max_iters,
+        init_with_one_atom=init_one_atom,
+        inner_alt_cycles=alt_cycles,
+        pg_max_iter=pg_max_iter,
+        pg_step_size=pg_step_size,
+        pg_tol=pg_tol,
+        verbose=verbose,
+        truncation=truncation,
         seed=seed,
     )
+    obj_base = res_base["obj_hist"][-1] if res_base["obj_hist"].size else float("nan")
+    hard_base = res_base["W"].argmax(axis=0)
 
-    print("\nFinal number of atoms:", res["A_atoms"].shape[0])
-    print("Final objective:", res["obj_hist"][-1] if res["obj_hist"].size else None)
-    print("Final lambdas:")
-    print(np.array2string(res["lam"], precision=4, suppress_small=True))
-    print("Final atoms A:")
-    print(np.array2string(res["A_atoms"], precision=4, suppress_small=True))
+    # ── CoGEnT + graph term  -<Abar, L>,  Abar = 2A - 1 ─────────────────
+    # paper's μ controls relative weight: graph coeff = 1/(μ·n)
+    print(f"\n── CoGEnT + graph term -<Abar,L> (gamma={gamma}, mu={mu}, p={p}) ──")
+    res_graph = cogent_structured_atoms_with_W(
+        X=X,
+        gamma=gamma,
+        mu=mu,
+        max_iters=max_iters,
+        init_with_one_atom=init_one_atom,
+        inner_alt_cycles=alt_cycles,
+        pg_max_iter=pg_max_iter,
+        pg_step_size=pg_step_size,
+        pg_tol=pg_tol,
+        verbose=verbose,
+        truncation=truncation,
+        seed=seed,
+        A_graph=A_graph,
+    )
+    obj_graph = (
+        res_graph["obj_hist"][-1] if res_graph["obj_hist"].size else float("nan")
+    )
+    hard_graph = res_graph["W"].argmax(axis=0)
 
-    plot_solution(X, labels, A_opt, centroids, res=res, gamma_val=gamma_val)
+    # ── Performance summary ──────────────────────────────────────────────
+    def cluster_accuracy(pred_labels, true_labels):
+        """Best-permutation accuracy via Hungarian matching (handles K_pred != K_true)."""
+        from scipy.optimize import linear_sum_assignment
+
+        K_p = int(pred_labels.max()) + 1
+        K_t = int(true_labels.max()) + 1
+        K = max(K_p, K_t)
+        cost = np.zeros((K, K), dtype=int)
+        for p_i, t_i in zip(pred_labels, true_labels):
+            cost[p_i, t_i] += 1
+        row_ind, col_ind = linear_sum_assignment(-cost)
+        return float(cost[row_ind, col_ind].sum()) / len(true_labels)
+
+    def graph_term_inner(W, A):
+        """Evaluate -<Abar, L> where Abar = 2A-1, L = sqW^T sqW."""
+        sqW = np.sqrt(np.maximum(W, 0.0))
+        L = sqW.T @ sqW
+        return float(-np.sum((2.0 * A - 1.0) * L))
+
+    acc_base = cluster_accuracy(hard_base, labels)
+    acc_graph = cluster_accuracy(hard_graph, labels)
+    gt_base = graph_term_inner(res_base["W"], A_graph)
+    gt_graph = graph_term_inner(res_graph["W"], A_graph)
+
+    # SBM graph statistics (using true labels)
+    n_within = int(A_graph[same_block == 1].sum()) // 2
+    n_between = int(A_graph[same_block == 0].sum()) // 2
+    dens_within = n_within / (n_per_cluster * (n_per_cluster - 1) // 2 * K_true)
+    dens_between = n_between / (
+        n_per_cluster * n_per_cluster * K_true * (K_true - 1) // 2
+    )
+
+    print("\n══════════ Graph statistics ══════════")
+    print(f"  Total edges:              {n_within + n_between}")
+    print(
+        f"  Within-community edges:   {n_within}  (density={dens_within:.3f}, expected={1-p:.1f})"
+    )
+    print(
+        f"  Between-community edges:  {n_between}  (density={dens_between:.3f}, expected={p:.1f})"
+    )
+
+    print("\n══════════ Performance summary ══════════")
+    print(f"{'':30s} {'Baseline':>12s} {'+ Graph':>12s}")
+    print(
+        f"{'K (atoms found)':30s} {res_base['A_atoms'].shape[0]:>12d} {res_graph['A_atoms'].shape[0]:>12d}"
+    )
+    print(f"{'Obj (full)':30s} {obj_base:>12.4f} {obj_graph:>12.4f}")
+    print(f"{'- <Abar,L> (lower=better)':30s} {gt_base:>12.4f} {gt_graph:>12.4f}")
+    print(f"{'Cluster accuracy':30s} {acc_base:>12.4f} {acc_graph:>12.4f}")
+    print(f"{'CVX obj (reference)':30s} {result['objective_value']:>12.4f}")
+    print("══════════════════════════════════════════")
+
+    # ── Plots ────────────────────────────────────────────────────────────
+    cmap = plt.colormaps.get_cmap("tab10").resampled(K_true)
+    node_colors = [cmap(labels[v]) for v in range(n)]
+
+    # 1) Graph plot (node positions = X, edges from A_graph)
+    fig_g, ax_g = plt.subplots(figsize=(7, 6))
+    edges = np.argwhere(np.triu(A_graph, k=1))
+    for u, v in edges:
+        ax_g.plot(
+            [X[u, 0], X[v, 0]],
+            [X[u, 1], X[v, 1]],
+            color="gray",
+            linewidth=0.3,
+            alpha=0.3,
+            zorder=1,
+        )
+    ax_g.scatter(X[:, 0], X[:, 1], c=node_colors, s=20, zorder=2)
+    ax_g.set_title(
+        f"SBM graph  (p_in={1-p}, p_out={p}, n={n},  {edges.shape[0]} edges)"
+    )
+    ax_g.set_xlabel("x1")
+    ax_g.set_ylabel("x2")
+    ax_g.axis("equal")
+
+    # 2) Side-by-side atom comparison
+    fig_c, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for ax, res, title in zip(
+        axes,
+        [res_base, res_graph],
+        [
+            f"Baseline (no graph)  acc={acc_base:.3f}",
+            f"+ Graph term  acc={acc_graph:.3f}",
+        ],
+    ):
+        hard = res["W"].argmax(axis=0)
+        for k in range(K_true):
+            idx = hard == k
+            ax.scatter(X[idx, 0], X[idx, 1], alpha=0.4, label=f"pred {k}")
+        C = np.asarray(centroids, dtype=float)
+        ax.scatter(
+            C[:, 0], C[:, 1], marker="x", s=200, color="black", label="true centroids"
+        )
+        A = res["A_atoms"]
+        if A.size:
+            ax.scatter(
+                A[:, 0],
+                A[:, 1],
+                marker="o",
+                s=180,
+                edgecolors="red",
+                facecolors="none",
+                linewidths=2,
+                label="atoms",
+            )
+        ax.set_title(title)
+        ax.axis("equal")
+        ax.set_xlabel("x1")
+        ax.set_ylabel("x2")
+        ax.legend(fontsize=8)
+    fig_c.suptitle(f"CoGEnT atoms  γ={gamma:.4f}  μ={mu:.1f}  p={p}")
+    plt.tight_layout()
     plt.show()
