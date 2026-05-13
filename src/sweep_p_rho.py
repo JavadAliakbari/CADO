@@ -26,6 +26,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 from scipy.cluster.vq import kmeans2
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as _mp
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -50,16 +52,16 @@ empirical_pmax = _cev.empirical_pmax
 # ------------------------------------------------------------------
 K = 5
 D = 2
-N_PER_CLUSTER = 10  # n = 50 total
+N_PER_CLUSTER = 25  # n = 50 total
 R_RING = 4.0  # centroid ring radius (d_min = 2 R sin(pi/K) ≈ 4.70)
 GAMMA = 3.0  # gamma/K = 0.6
-N_TRIALS = 2
+N_TRIALS = 20
 
 # Fixed point of the OTHER axis is chosen near the boundary of the
 # recovery region so neither feature-only nor graph-only succeeds alone,
 # but their combination does.
-P_FIXED = 0.25  # fixed for the rho-sweep   (above p* ≈ 0.117)
-RHO_FIXED = 2.0  # fixed for the p-sweep     (above gamma/K = 0.6)
+P_FIXED = 0.2  # fixed for the rho-sweep   (above p* ≈ 0.117)
+RHO_FIXED = 1.2  # fixed for the p-sweep     (above gamma/K = 0.6)
 
 # --- p_max sweep ---------------------------------------------------------
 # Paper definition (eq. 6):  p_max = max_{i,j} ( bar_rho_ij + 2 * delta_ij )
@@ -73,9 +75,9 @@ RHO_FIXED = 2.0  # fixed for the p-sweep     (above gamma/K = 0.6)
 # Achievability: a regular graph requires N * (intra_deg) to be even.
 #   - Even N: every value m/N is achievable exactly.
 #   - Odd N:  only even m hits the target exactly; odd m gets bumped.
-M_SWEEP = np.array([1, 2, 3, 4, 5, 6, 7, 8])  # mis-edges per node
+M_SWEEP = np.arange(0, 8)  # mis-edges per node
 P_SWEEP = M_SWEEP / N_PER_CLUSTER  # corresponding exact p_max
-RHO_SWEEP = np.linspace(0.5, 4.5, 12)
+RHO_SWEEP = np.linspace(0.5, 6, 12)
 
 
 def block_pmax_breakdown(A, labels):
@@ -104,6 +106,10 @@ def block_pmax_breakdown(A, labels):
 # Combined regime: mu controls graph weight (1/(mu*n)).  Smaller mu = stronger
 # graph term.  We try a small grid and take the BEST mu per cell.
 MU_GRID = [0.5]
+
+# Number of parallel worker processes.  Default = all physical cores; override
+# with the SWEEP_WORKERS env var (e.g. SWEEP_WORKERS=4 python src/sweep_p_rho.py).
+N_WORKERS = max(1, int(os.environ.get("SWEEP_WORKERS", _mp.cpu_count())))
 
 SOLVER_KW = dict(
     max_iters=20,
@@ -192,41 +198,73 @@ def run_cell(p_target, rho_target, trial_seed):
     return acc_f, acc_g, acc_c_best, rho_emp, pmax_emp, br_max, td_max
 
 
+def _run_cell_task(args):
+    """Process-pool worker: unpack args, return (i, t, results...)."""
+    i, t, p_target, rho_target, seed = args
+    af, ag, ac, re, pe, br, td = run_cell(p_target, rho_target, seed)
+    return i, t, af, ag, ac, re, pe, br, td
+
+
 def sweep(axis_name, axis_vals, fixed_val):
-    """Sweep one axis; the other is held at fixed_val. Returns mean and std arrays."""
+    """Sweep one axis; the other is held at fixed_val. Returns mean and std arrays.
+
+    Tasks for all (axis_value, trial) pairs are dispatched in parallel across
+    `N_WORKERS` processes.
+    """
     n = len(axis_vals)
     means = np.zeros((n, 3))
     stds = np.zeros((n, 3))
     rho_emp_log = np.zeros(n)
     pmax_emp_log = np.zeros(n)
 
-    print(f"\n--- Sweeping {axis_name} ({n} values, {N_TRIALS} trials each) ---")
+    accs = np.zeros((n, N_TRIALS, 3))
+    rho_e = np.zeros((n, N_TRIALS))
+    p_e = np.zeros((n, N_TRIALS))
+    br_e = np.zeros((n, N_TRIALS))
+    td_e = np.zeros((n, N_TRIALS))
+
+    tasks = []
     for i, v in enumerate(axis_vals):
         if axis_name == "p":
             p_target, rho_target = float(v), float(fixed_val)
         else:
             p_target, rho_target = float(fixed_val), float(v)
-        accs = np.zeros((N_TRIALS, 3))
-        rho_e = np.zeros(N_TRIALS)
-        p_e = np.zeros(N_TRIALS)
-        br_e = np.zeros(N_TRIALS)
-        td_e = np.zeros(N_TRIALS)
         for t in range(N_TRIALS):
             seed = 1000 * (i + 1) + t
-            af, ag, ac, re, pe, br, td = run_cell(p_target, rho_target, seed)
-            accs[t] = [af, ag, ac]
-            rho_e[t] = re
-            p_e[t] = pe
-            br_e[t] = br
-            td_e[t] = td
-        means[i] = accs.mean(0)
-        stds[i] = accs.std(0)
-        rho_emp_log[i] = rho_e.mean()
-        pmax_emp_log[i] = p_e.mean()
+            tasks.append((i, t, p_target, rho_target, seed))
+
+    n_tasks = len(tasks)
+    print(
+        f"\n--- Sweeping {axis_name} ({n} values, {N_TRIALS} trials each, "
+        f"{n_tasks} tasks, {N_WORKERS} workers) ---"
+    )
+
+    done = 0
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as ex:
+        futs = [ex.submit(_run_cell_task, t) for t in tasks]
+        for fut in as_completed(futs):
+            i, t, af, ag, ac, re, pe, br, td = fut.result()
+            accs[i, t] = [af, ag, ac]
+            rho_e[i, t] = re
+            p_e[i, t] = pe
+            br_e[i, t] = br
+            td_e[i, t] = td
+            done += 1
+            if done % max(1, n_tasks // 20) == 0 or done == n_tasks:
+                print(f"  [{done:4d}/{n_tasks}]  ({100.0 * done / n_tasks:5.1f}%)")
+
+    means = accs.mean(axis=1)
+    stds = accs.std(axis=1)
+    rho_emp_log = rho_e.mean(axis=1)
+    pmax_emp_log = p_e.mean(axis=1)
+    br_log = br_e.mean(axis=1)
+    td_log = td_e.mean(axis=1)
+
+    for i, v in enumerate(axis_vals):
         print(
             f"  {axis_name}={v:.4f}  rho_emp={rho_emp_log[i]:.3f}  "
             f"pmax_emp={pmax_emp_log[i]:.3f}  "
-            f"(bar_rho={br_e.mean():.3f} + 2*delta={td_e.mean():.3f})  "
+            f"(bar_rho={br_log[i]:.3f} + 2*delta={td_log[i]:.3f})  "
             f"feat={means[i,0]:.3f}  graph={means[i,1]:.3f}  combined={means[i,2]:.3f}"
         )
     return means, stds, rho_emp_log, pmax_emp_log
@@ -270,6 +308,7 @@ if __name__ == "__main__":
     print(f"  K={K}, d={D}, n_per_cluster={N_PER_CLUSTER}, n={K*N_PER_CLUSTER}")
     print(f"  gamma={GAMMA}  ->  gamma/K={GAMMA/K:.3f}")
     print(f"  N_TRIALS={N_TRIALS},  MU_GRID={MU_GRID}")
+    print(f"  Parallel workers: {N_WORKERS}")
     print(f"  P_SWEEP   ({len(P_SWEEP)} pts) at rho={RHO_FIXED}")
     print(f"  RHO_SWEEP ({len(RHO_SWEEP)} pts) at p ={P_FIXED}")
 
