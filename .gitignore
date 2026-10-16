@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.nbi
+*.nbc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.idea/
+.venv/
+venv/
+.env
+# scratch runs (the final results in results/enhancement_* are tracked)
+results/smoke/

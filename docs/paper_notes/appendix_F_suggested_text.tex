@@ -1,0 +1,121 @@
+% ---------------------------------------------------------------------------
+% Suggested replacement text for App. F (forward step, inner step, truncation,
+% Algorithm 1) so that the appendix matches the code (cogent/solver.py).
+% Equation numbers (104)-(123) refer to the current draft; adapt the macros.
+% Two versions of the F.3 implementation paragraph are given: (A) the default
+% block-coordinate step (enhancement="bcd", used for the main figure) and (B) the
+% Frank-Wolfe step already written in F.3 (enhancement="fw"), with the two
+% details the code needs to run it.  Use one of them.
+% ---------------------------------------------------------------------------
+
+% ===== F.3, first paragraph (replace "With the active set fixed, Phi_k is convex ...") =====
+With the active set fixed we decrease $\Phi_k$ by block-coordinate descent over the rows of
+$\Omega$ and over $\{\theta_i\}$. Note that $\Phi_k$ is convex in $\{\theta_i\}$ for fixed $\Omega$,
+but not in $\Omega$: for a non-edge ($\bar A_{uw}=-1$) the graph term contributes the concave
+function $\sqrt{\omega_{u,i}\,\omega_{w,i}}$. Convexity of (14) holds in the atomic weights over the
+fixed (infinite) atomic set, not in the reduced variables. As in the enhancement step of CoGEnT,
+any update that keeps every row of $\Omega$ in $\Delta^k$ and does not increase $\Phi_k$ can be used.
+
+% ----- (A) implementation of the inner step, enhancement="bcd"
+%       (replace the last sentence of the F.3 intro) -----
+In our implementation a row $\Omega_{v,:}$ is replaced by the best of the following candidates:
+the Frank--Wolfe vertex $\delta_{i^\star_v}$ of (109) and the other vertices with the smallest
+partial derivatives (105), the Frank--Wolfe point $(1-\alpha)\Omega_{v,:}+\alpha\,\delta_{i^\star_v}$,
+with $\alpha\in\{\tfrac14,\tfrac12\}$, and the pairwise steps that move half or all of the mass of
+the active atom with the largest partial derivative to $i^\star_v$. Only row and column $v$ of $L$ and the parameter $\theta_v$ change, so the
+change of $\Phi_k$ is evaluated exactly in $O(n(k+d))$ operations. The row is updated only if
+$\Phi_k$ decreases. The atoms are updated by a majorize--minimize step for the fusion term,
+$\|z\|_2\le \|z\|_2^2/(2\|z_0\|_2)+\|z_0\|_2/2$. For the loss (22) this step is a $k\times k$
+linear system for the feature block and a simplex-constrained quadratic program for the
+label block; for a general $f_v$ it is solved by accelerated projected gradient.
+
+% ----- (B) alternative: keep the Frank--Wolfe enhancement step of F.3, enhancement="fw"
+%       (add after (113)) -----
+The linear minimization (112) over $\Theta_f$ requires $\Theta_f$ to be compact. For the loss (22)
+we use $\Theta_f=\{a:\|a\|_2\le R\}\times\Delta^K$ with $R=\max_v\|z_v\|_2$. This does not change
+the optimal value of (14): projecting every feature block $a_v$ onto the convex hull of the
+features does not increase the loss or the fusion term. The minimizer in (112) is then
+$a=-R\,g_a/\|g_a\|_2$ and the vertex of $\Delta^K$ with the smallest entry of $g_\pi$. In (105)
+the graph part $-(\bar A e_i)_v/e_{i,v}$ is unbounded as $e_{i,v}\to0$; we replace $e_{i,v}$ by
+$\max(e_{i,v},\varepsilon)$. Both updates (111) and (113) use one common step size per block,
+chosen by a line search on $\Phi_k$, and are applied only if $\Phi_k$ decreases. Because the graph
+part of (105) is of order $1/\varepsilon$ on every empty entry, a small $\varepsilon$ lets the
+graph term dominate the row direction even when $\mu$ is large; the exact-change row updates of
+(A) do not have this sensitivity.
+
+% ===== F.4, replace the paragraphs "Solving the oracle", "Forward update" and
+%       "Implementation used in Sec. 6" =====
+\paragraph{Solving the oracle.}
+Along (114) node $v$ can give at most its whole mass, so the admissible step
+$\rho\le 1/\max_v e_v^2$ depends on the candidate $e$. As in the conditional-gradient step of
+CoGEnT, where every atom is compared at the boundary of the feasible set, we compare candidates
+by the first-order change of $\Phi$ at their maximal step, i.e.\ by the rate (115) multiplied
+by $1/\max_v e_v^2$. Writing $u_v := e_v^2/\max_w e_w^2\in[0,1]$ for the fraction of the mass
+of node $v$ that is moved to the new atom, this quantity reads
+\begin{equation}
+  \Delta(u,\theta) \;=\; -\sum_{v,w\in\mathcal V}\bar A_{vw}\sqrt{u_v u_w}
+  \;+\;\sum_{v\in\mathcal V} u_v\, d_v(\theta),
+  \qquad u\in[0,1]^n,\ \theta\in\Theta_f .
+  \label{eq:oracle}
+\end{equation}
+We search for candidates with $u=\mathbf 1_S$, i.e.\ every node of a set $S$ moves the same
+fraction of its mass. For fixed $\theta$, \eqref{eq:oracle} is then a quadratic function of
+$\mathbf 1_S$, and for fixed $S$ the best $\theta$ is given by (121). We minimize it approximately.
+
+Every node first chooses its own parameter $\theta^{\mathrm{new}}_v$ by (117), which gives the
+scores $s_v$ of (118) and the lower bound
+$\Delta(u,\theta)\ge -\sum_{v,w}\bar A_{vw}\sqrt{u_vu_w}+\sum_v u_v s_v$. With $u_v=e_v^2$, the
+minimization of this bound over unit vectors is the Rayleigh quotient of $\bar A-\mathrm{diag}(s)$.
+We take the nonnegative part of its leading eigenvectors (for both signs), and among their level
+sets $S_\tau=\{v: e_v\ge\tau\}$ we keep the one that minimizes the bound with $u=\mathbf 1_{S_\tau}$.
+Without a graph term these eigenvectors carry no information, so we also start from the single
+nodes with the smallest $s_v$.
+
+From every start we alternate two steps:
+(i) $\theta^{\mathrm{new}}$ is the minimizer (121) with weights $u_v=\mathbf 1\{v\in S\}$;
+(ii) $S$ is improved by single-node insertions and removals that decrease \eqref{eq:oracle} with
+$d_v=d_v(\theta^{\mathrm{new}})$.
+Without the graph term the second step is exact: $u_v=\mathbf 1\{d_v(\theta^{\mathrm{new}})<0\}$,
+i.e.\ every node that the new atom fits better moves to it.
+
+\paragraph{Remark (tied node parameters).}
+The rate (115)--(116) uses $g_{vw}=0$ when $\theta_v=\theta_w$. Along (114) such a pair satisfies
+$\theta_v(t)-\theta_w(t)=t\,(u_v-u_w)(\theta-\theta_v)$. The exact one-sided derivative therefore
+contains the additional nonnegative term
+$\gamma\mu\sum_{v<w:\,\theta_v=\theta_w}|u_v-u_w|\,\|\theta-\theta_v\|_2$. At hard assignments
+every class is a tied group, and (115) can then even have the wrong sign. Since the rate is in any
+case a first-order model, valid only for small steps, we do not rely on the single best candidate.
+The several best candidates are passed to the line search below, which uses the exact $\Phi$. Using
+the exact (tie-aware) rate for the ranking instead was not better in our experiments.
+
+\paragraph{Forward update.}
+The new atom $(u,\theta^{\mathrm{new}})$ is appended along (114) with $\rho\, e_v^2 = t\,u_v$:
+\begin{equation}
+  \Omega^{(t+\frac12)}_{v,i}=
+  \begin{cases}(1-t\,u_v)\,\omega^{(t)}_{v,i}, & i\le k,\\ t\,u_v, & i=k+1,\end{cases}
+  \qquad \theta^{(t+\frac12)}_{k+1}=\theta^{\mathrm{new}},\qquad k\leftarrow k+1,
+\end{equation}
+where, among the six candidates with the most negative rate \eqref{eq:oracle}, the candidate and
+$t\in[0,1]$ minimize $\Phi_{k+1}$ along this path (line search, as in CoGEnT). Every row of $\Omega$
+stays in the simplex. The line search does not increase the objective. If it returns $t=0$ for
+every candidate, or no candidate has a negative rate, no atom is added. The inner step of
+Sec.~F.3 is then run on the enlarged active set.
+
+% ===== F.5, candidate selection (add after the definition of Phi^{(-j)}) =====
+As in Algorithm~2 of CoGEnT, a cheap screen selects the candidate: we evaluate
+$\Phi^{(-j)}$ without re-optimization for the lightest atoms and for the atoms closest to
+another atom, and re-optimize only the best candidate before testing (123).
+
+% ===== Algorithm 1, lines 1-7 =====
+% 1: Initialize k <- 1, Omega <- 1_n, theta_1 <- argmin_{theta in Theta_f} sum_v f_v(z_v; theta)
+% 2: Phi_prev <- Phi_1(Omega, {theta_1})
+% 3: for t = 1, ..., T do
+%      // (a) Forward step: select a new atom with the oracle (Sec. F.4)
+% 4:   Compute theta_v^new by (117), s_v by (118), and the leading eigenvectors of Abar - diag(s)
+% 5:   For each start (level sets of the eigenvectors, single nodes with smallest s_v):
+%      alternate theta^new by (121) and single-node flips of S on (eq:oracle)
+% 6:   Line search along (114) on the six candidates with the most negative rate; append the
+%      candidate with the lowest Phi_{k+1} if it decreases Phi; k <- k+1
+%      // (b) Inner step ... (unchanged)
+%      // (c) Backward step ... (unchanged)
+%    Stop when no candidate decreases Phi and the inner/backward steps make no progress.
